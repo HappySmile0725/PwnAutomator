@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PwnAutomator</title>
+    <link rel="stylesheet" href="/auth/register.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="container">
+        <div class="logo">
+            <span class="logo-text">Signup Pwn<span class="accent">Automator</span></span>
+        </div>
+        <p class="subtitle">Pwnable Automation Platform</p>
+        
+        <form action="/auth/register" method="POST">
+            <div class="form-group">
+                <label for="id">ID</label>
+                <input type="text" id="id" name="id" placeholder="Enter ID" required>
+            </div>
+            <div class="form-group">
+                <label for="pwd">Password</label>
+                <input type="password" id="pwd" name="pwd" placeholder="Enter password" required>
+            </div>
+            <button type="submit">
+                <span>Create Account</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                    <circle cx="8.5" cy="7" r="4"/>
+                    <line x1="20" y1="8" x2="20" y2="14"/>
+                    <line x1="23" y1="11" x2="17" y2="11"/>
+                </svg>
+            </button>
+            <% if (locals.error) { %>
+                <div class="error-msg"><%= error %></div>
+            <% } %>
+        </form>
+        
+        <p class="login-link">Already have an account? <a href="/auth/login">Login here</a></p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PwnAutomator</title>
+    <link rel="stylesheet" href="/auth/login.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="container">
+        <div class="logo">
+            <span class="logo-text">Signin Pwn<span class="accent">Automator</span></span>
+        </div>
+        <p class="subtitle">Pwnable Automation Platform</p>
+        
+        <form action="/auth/login" method="POST">
+            <div class="form-group">
+                <label for="id">ID</label>
+                <input type="text" id="id" name="id" placeholder="Enter ID" required>
+            </div>
+            <div class="form-group">
+                <label for="pwd">Password</label>
+                <input type="password" id="pwd" name="pwd" placeholder="Enter password" required>
+            </div>
+            <button type="submit">
+                <span>Access System</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+            </button>
+            <% if (locals.error) { %>
+                <div class="error-msg">Wrong ID or Password</div>
+            <% } %>
+        </form>
+        
+        <p class="register-link">Don't have an account? <a href="/auth/register">Register here</a></p>
+    </div>
+</body>
+</html>
