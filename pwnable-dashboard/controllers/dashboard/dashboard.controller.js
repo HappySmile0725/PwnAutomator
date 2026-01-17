@@ -3,7 +3,8 @@ const router = express.Router();
 
 const dashboardService = require('../../services/dashboard/dashboard.service');
 const getaiDataService = require('../../services/dashboard/ais/getaiData.service');
-// const aiService = require('../../services/dashboard/ais/ai.service');
+const trackService = require('../../services/dashboard/ais/track.service');
+const uploadService = require('../../services/dashboard/upload.service');
 
 router.get('/', async (req, res) => {
     const dashboardData = await dashboardService.getDashboardData();
@@ -22,10 +23,27 @@ router.get('/', async (req, res) => {
     });
 });
 
-router.get('/ai', async (req, res) => {
-    const aiData = await aiService.getAIData();
+router.post('/upload', async (req, res) => {
+    const result = await uploadService.handleFileUpload(req);
+    if (result.success) {
+        return res.status(200).render('dashboard/ai', {
+            title: 'AI Dashboard',
+            ai: result.ai,
+            status: result.status
+        });
+    } else {
+        return res.status(400).render('dashboard/error', {
+            title: 'Upload Error',
+            error: result.error || 'File upload failed.'
+        });
+    }
+});
 
-    if (!aiData) {
+router.get('/ai', async (req, res) => {
+    const track = await trackService.getTrackData();
+    const getaiData = await getaiDataService.getAIData();
+
+    if (!track) {
         return res.status(500).render('dashboard/error', {
             title: 'AI Dashboard Error',
             error: 'Unable to load AI dashboard data.'
@@ -34,21 +52,9 @@ router.get('/ai', async (req, res) => {
 
     return res.status(200).render('dashboard/ai', {
         title: 'AI Dashboard',
-        ai: aiData,
+        ai: track,
+        status: getaiData
     });
-});
-
-router.post('/ai/upload', async (req, res) => {
-    const result = await aiService.handleUpload(req);
-
-    if (!result.success) {
-        return res.status(400).render('dashboard/error', {
-            title: 'AI Upload Error',
-            error: result.message || 'Failed to upload AI model.'
-        });
-    }
-
-    return res.status(200).redirect('/dashboard/ai');
 });
 
 module.exports = router;

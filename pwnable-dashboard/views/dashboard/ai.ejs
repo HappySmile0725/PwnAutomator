@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PwnAutomator - AI</title>
+    <link rel="stylesheet" href="/dashboard/ai.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="dashboard">
+        <header class="header">
+            <div class="logo">
+                <span class="logo-text">Pwn<span class="accent">Automator</span></span>
+            </div>
+            <div class="header-toggle">
+                <a href="/dashboard" class="toggle-link">Dashboard</a>
+                <a href="/dashboard/ai" class="toggle-link active">AI</a>
+                <span class="toggle-knob"></span>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="ai-card">
+                <h2 class="card-title">AI Engine</h2>
+                
+                <div class="ai-info">
+                    <div class="info-row">
+                        <span class="label">Model</span>
+                        <span class="value model-name">Qwen3-Coder-30b</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Status</span>
+                        <% 
+                            const currentStatus = status?.status || 'Nothing';
+                            const normalizedStatus = String(currentStatus).toLowerCase();
+                            const statusClass = normalizedStatus === 'operational' ? 'status-ready' : 'status-idle';
+                        %>
+                        <span class="status-pill <%= statusClass %>">
+                            <%= currentStatus %>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="tracking-section">
+                    <h3 class="section-title">Tracking Files</h3>
+                    <div class="file-list">
+                        <% if (ai?.files && ai.files.length > 0) { %>
+                            <% ai.files.forEach(file => { %>
+                                <div class="file-item">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                        <polyline points="14 2 14 8 20 8"/>
+                                    </svg>
+                                    <span class="file-name"><%= file %></span>
+                                </div>
+                            <% }) %>
+                        <% } else { %>
+                            <p class="no-files">No files tracked</p>
+                        <% } %>
+                    </div>
+                </div>
+
+                <div class="action-section">
+                    <form action="/dashboard/upload" method="POST" enctype="multipart/form-data" class="upload-form">
+                        <label class="upload-area" for="file-upload">
+                            <input type="file" id="file-upload" name="file" multiple hidden>
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <span>Drop files or click to upload</span>
+                        </label>
+                    </form>
+
+                    <button class="run-button" id="run-btn" <%= currentStatus === 'Running' ? 'disabled' : '' %>>
+                        <% if (currentStatus === 'Running') { %>
+                            <svg class="spinner" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                            </svg>
+                            <span>Running...</span>
+                        <% } else { %>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            <span>Run Analysis</span>
+                        <% } %>
+                    </button>
+                </div>
+            </div>
+
+            <div class="output-card">
+                <h2 class="card-title">Output</h2>
+                <div class="output-console">
+                    <% if (ai?.output && ai.output.length > 0) { %>
+                        <% ai.output.forEach(line => { %>
+                            <div class="console-line"><%= line %></div>
+                        <% }) %>
+                    <% } else { %>
+                        <div class="console-line dim">Waiting for analysis...</div>
+                    <% } %>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const uploadInput = document.getElementById('file-upload');
+        const uploadForm = uploadInput.closest('form');
+
+        uploadInput.addEventListener('change', async function() {
+            if (this.files.length === 0) {
+                return;
+            }
+
+            const formData = new FormData(uploadForm);
+            const response = await fetch(uploadForm.action, {
+                method: 'POST',
+                body: formData
+            });
+            if (response.ok) {
+                alert('Success Upload');
+            }
+        });
+
+        document.getElementById('run-btn').addEventListener('click', function() {
+            if (!this.disabled) {
+                fetch('/dashboard/ai/run', { method: 'POST' })
+                    .then(() => location.reload());
+            }
+        });
+    </script>
+</body>
+</html>

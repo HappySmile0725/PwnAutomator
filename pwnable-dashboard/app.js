@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const cookieParser = require('cookie-parser');
+const fileUpload = require('express-fileupload');
 const session = require('express-session');
 
 const indexRouter = require('./routers/index.router');
@@ -19,6 +20,7 @@ app.set('view engine', 'ejs');
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use(fileUpload());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
