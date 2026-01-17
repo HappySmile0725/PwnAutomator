@@ -5,5 +5,6 @@ const dashboardController = require('../../controllers/dashboard/dashboard.contr
 const checklogin = require('../../middlewares/checkLogin.middleware');
 
 router.use('/dashboard', checklogin, dashboardController);
+router.use('/dashboard/ai', checklogin, dashboardController);
 
 module.exports = router;

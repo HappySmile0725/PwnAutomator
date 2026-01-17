@@ -1,5 +1,5 @@
 const bcrypt = require('bcrypt');
-const { writeUser } = require('../user.service');
+const { writeUser } = require('./user.service');
 
 const register = async (id, password) => {
     const hashedPassword = await bcrypt.hash(password, 10);

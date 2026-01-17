@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PwnAutomator - Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/dashboard.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <%
+        const gpuInfo = (dashboard?.hardware?.gpu?.[0]) || { name: 'Unknown', memoryTotal: 0, memoryUsed: 0 };
+        const vramTotal = Number(gpuInfo.memoryTotal) || 0;
+        const vramUsed = Number(gpuInfo.memoryUsed) / 1000 || 0;
+        const usagePercent = vramTotal > 0 ? Math.round((Number(gpuInfo.memoryUsed) / vramTotal) * 100) : 0;
+        const usageDeg = usagePercent * 1.8;
+        const greenDeg = Math.min(usageDeg, 61.2);
+        const yellowDeg = Math.min(usageDeg, 122.4);
+        const historyItems = Array.isArray(dashboard?.recent) ? dashboard.recent : [];
+        const currentItem = historyItems[0] || null;
+        const currentStart = currentItem?.start || '-';
+        const rawStatus = ai?.status ?? ai?.operating ?? ai?.isOperating ?? ai?.state ?? ai?.running;
+        const normalizedStatus = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : rawStatus;
+        const isOperating = normalizedStatus === true || ['operating', 'operational', 'running', 'active', 'on'].includes(normalizedStatus);
+        const aiStatusText = isOperating ? 'Operating' : 'Nothing';
+        const aiStatusClass = isOperating ? 'status-ok' : 'status-idle';
+        const stats = dashboard?.statistics || {};
+        const stackCount = Number(stats.stack) || 0;
+        const heapCount = Number(stats.heap) || 0;
+        const kernelCount = Number(stats.kernel) || 0;
+        const iotCount = Number(stats.iot) || 0;
+        const statsTotal = stackCount + heapCount + kernelCount + iotCount;
+        const stackDeg = statsTotal > 0 ? (stackCount / statsTotal) * 360 : 0;
+        const heapDeg = statsTotal > 0 ? (heapCount / statsTotal) * 360 : 0;
+        const kernelDeg = statsTotal > 0 ? (kernelCount / statsTotal) * 360 : 0;
+        const iotDeg = statsTotal > 0 ? (iotCount / statsTotal) * 360 : 0;
+        const stackEnd = stackDeg;
+        const heapEnd = stackEnd + heapDeg;
+        const kernelEnd = heapEnd + kernelDeg;
+        const iotEnd = kernelEnd + iotDeg;
+        const statsRingClass = statsTotal > 0 ? 'stats-ring' : 'stats-ring empty';
+        const historyBaseUrl = '/data/storage/history';
+        const buildHistoryUrl = (fileName) => {
+            if (!fileName) {
+                return '';
+            }
+            return `${historyBaseUrl}/${fileName}`;
+        };
+    %>
+    <div class="bg-grid"></div>
+    <div class="dashboard">
+        <header class="header">
+            <div class="logo">
+                <span class="logo-text">Pwn<span class="accent">Automator</span></span>
+            </div>
+            <nav class="header-toggle" aria-label="Dashboard navigation">
+                <a class="toggle-link" href="/dashboard/">
+                    <span class="toggle-text">Dashboard</span>
+                </a>
+                <a class="toggle-link" href="/dashboard/ai">
+                    <span class="toggle-text">AI</span>
+                </a>
+                <span class="toggle-knob" aria-hidden="true"></span>
+            </nav>
+        </header>
+
+        <main class="main-content">
+            <div class="gpu-card">
+                <div class="gpu-info">
+                    <h3 class="card-title">GPU Status</h3>
+                    <div class="info-row">
+                        <span class="label">Name</span>
+                        <span class="value" id="gpu-name"><%= gpuInfo.name %></span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">VRAM</span>
+                        <span class="value" id="gpu-vram"><%= vramTotal %>GB</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Usage</span>
+                        <span class="value usage-text" id="gpu-usage"><%= vramUsed %>GB</span>
+                    </div>
+                </div>
+                <div class="gpu-gauge">
+                    <div class="gauge">
+                        <div class="gauge-body">
+                            <div class="gauge-fill" id="gpu-gauge-fill" style="--usage-deg: <%= usageDeg %>deg; --green-deg: <%= greenDeg %>deg; --yellow-deg: <%= yellowDeg %>deg;"></div>
+                            <div class="gauge-cover">
+                                <span class="gauge-value" id="gpu-gauge-value"><%= usagePercent %>%</span>
+                            </div>
+                            <div class="gauge-needle" id="gpu-gauge-needle" style="--usage-deg: <%= usageDeg %>deg;"></div>
+                        </div>
+                        <div class="gauge-labels">
+                            <span>0</span>
+                            <span>50</span>
+                            <span>100</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="history-card">
+                <h3 class="card-title">History</h3>
+                <% if (historyItems.length === 0) { %>
+                    <p class="history-empty">No history yet.</p>
+                <% } else { %>
+                    <div class="history-list">
+                        <% historyItems.forEach((item, index) => { 
+                            const title = item.title || item.name || `Item ${index + 1}`;
+                            const duration = item.duration || item.time || item.elapsed || '-';
+                            const writeupName = item.writeupFile || item.writeup || '';
+                            const fileName = item.problemFile || item.file || '';
+                            const writeupUrl = buildHistoryUrl(writeupName);
+                            const fileUrl = buildHistoryUrl(fileName);
+                        %>
+                            <div class="history-item">
+                                <div class="history-meta">
+                                    <div class="history-title"><%= title %></div>
+                                    <div class="history-time">
+                                        <span class="label">Time</span>
+                                        <span class="value"><%= duration %></span>
+                                    </div>
+                                </div>
+                                <div class="history-actions">
+                                    <% if (writeupUrl) { %>
+                                        <a class="download-button" href="<%= writeupUrl %>" download>Writeup.md</a>
+                                    <% } else { %>
+                                        <span class="download-button disabled" aria-disabled="true">Writeup.md</span>
+                                    <% } %>
+                                    <% if (fileUrl) { %>
+                                        <a class="download-button" href="<%= fileUrl %>" download>Chall file</a>
+                                    <% } else { %>
+                                        <span class="download-button disabled" aria-disabled="true">Chall file</span>
+                                    <% } %>
+                                </div>
+                            </div>
+                        <% }) %>
+                    </div>
+                <% } %>
+            </div>
+            <div class="wide-card">
+                <div class="status-block">
+                    <h3 class="section-title">Current Run</h3>
+                    <div class="status-row">
+                        <span class="label">Status</span>
+                        <span class="status-pill <%= aiStatusClass %>"><%= aiStatusText %></span>
+                    </div>
+                    <div class="status-row">
+                        <span class="label">Start</span>
+                        <span class="value"><%= currentStart %></span>
+                    </div>
+                </div>
+                <div class="stats-block">
+                    <h3 class="section-title">Vulnerability Stats</h3>
+                    <div class="stats-content">
+                        <div class="<%= statsRingClass %>" style="--stack-end: <%= stackEnd %>deg; --heap-end: <%= heapEnd %>deg; --kernel-end: <%= kernelEnd %>deg; --iot-end: <%= iotEnd %>deg;"></div>
+                        <div class="stats-legend">
+                            <div class="legend-item">
+                                <span class="legend-dot stack"></span>
+                                <span class="legend-name">Stack</span>
+                                <span class="legend-value"><%= stackCount %></span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot heap"></span>
+                                <span class="legend-name">Heap</span>
+                                <span class="legend-value"><%= heapCount %></span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot kernel"></span>
+                                <span class="legend-name">Kernel</span>
+                                <span class="legend-value"><%= kernelCount %></span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot iot"></span>
+                                <span class="legend-name">IoT</span>
+                                <span class="legend-value"><%= iotCount %></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script>
+        const formatGb = (value) => {
+            if (!Number.isFinite(value) || value <= 0) {
+                return '0.0';
+            }
+            return (value / 1024).toFixed(1);
+        };
+
+        const updateGpuUi = (gpuData) => {
+            const nameEl = document.getElementById('gpu-name');
+            const vramEl = document.getElementById('gpu-vram');
+            const usageEl = document.getElementById('gpu-usage');
+            const gaugeFill = document.getElementById('gpu-gauge-fill');
+            const gaugeNeedle = document.getElementById('gpu-gauge-needle');
+            const gaugeValue = document.getElementById('gpu-gauge-value');
+
+            const name = gpuData?.name || 'Unknown';
+            const total = Number(gpuData?.memoryTotal) || 0;
+            const used = Number(gpuData?.memoryUsed) || 0;
+            const usagePercent = total > 0 ? Math.round((used / total) * 100) : 0;
+            const usageDeg = usagePercent * 1.8;
+            const greenDeg = Math.min(usageDeg, 61.2);
+            const yellowDeg = Math.min(usageDeg, 122.4);
+
+            nameEl.textContent = name;
+            vramEl.textContent = `${formatGb(total)}GB`;
+            usageEl.textContent = `${formatGb(used)}GB`;
+            gaugeValue.textContent = `${usagePercent}%`;
+            gaugeFill.style.setProperty('--usage-deg', `${usageDeg}deg`);
+            gaugeFill.style.setProperty('--green-deg', `${greenDeg}deg`);
+            gaugeFill.style.setProperty('--yellow-deg', `${yellowDeg}deg`);
+            gaugeNeedle.style.setProperty('--usage-deg', `${usageDeg}deg`);
+        };
+
+        const fetchGpuStatus = async () => {
+            try {
+                const response = await fetch('/dashboard/hardware', {
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (!response.ok) {
+                    return;
+                }
+                const data = await response.json();
+                updateGpuUi(data.gpu);
+            } catch (error) {
+                return;
+            }
+        };
+
+        fetchGpuStatus();
+        setInterval(fetchGpuStatus, 5000);
+    </script>
+</body>
+</html>

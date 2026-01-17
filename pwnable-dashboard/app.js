@@ -1,12 +1,12 @@
 const express = require('express');
 const path = require('path');
 const cookieParser = require('cookie-parser');
-const logger = require('morgan');
 const session = require('express-session');
 
 const indexRouter = require('./routers/index.router');
 const dashboardRouter = require('./routers/dashboard/dashboard.router');
 const authRouter = require('./routers/auth/auth.router');
+const checkLogin = require('./middlewares/checkLogin.middleware');
 
 const app = express();
 const dotenv = require('dotenv');
@@ -17,7 +17,6 @@ dotenv.config();
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 
-app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
@@ -33,6 +32,8 @@ app.use(session({
       httpOnly: true,
     }
 }));
+
+app.use('/data/storage/history', checkLogin, express.static(path.join(__dirname, 'data', 'storage', 'history'), { index: false }));
 
 app.use(indexRouter);
 app.use(authRouter);
