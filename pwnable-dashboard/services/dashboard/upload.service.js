@@ -1,9 +1,21 @@
 const fs = require('fs');
 const path = require('path');
 const { unzipArchive } = require('./building/unzip.service');
+const { setRunActive } = require('./ais/runtimeState');
 
 const storageDir = path.join(__dirname, '..', '..', 'data', 'storage', 'now');
+const aiDataPath = path.join(__dirname, '..', '..', 'data', 'ai.json');
 const targetName = 'chal.zip';
+
+const resetAiData = () => {
+    const payload = {
+        status: 'Nothing',
+        files: [],
+        output: []
+    };
+    setRunActive(false);
+    fs.writeFileSync(aiDataPath, JSON.stringify(payload, null, 2));
+};
 
 const resolveUploadFile = (req) => {
     if (!req.files || Object.keys(req.files).length === 0) {
@@ -47,6 +59,8 @@ const handleFileUpload = async (req) => {
     if (!unzipResult.success) {
         return { success: false, error: unzipResult.error || 'Failed to unzip file.' };
     }
+
+    resetAiData();
 
     return { success: true };
 };

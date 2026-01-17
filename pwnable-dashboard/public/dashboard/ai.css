@@ -341,8 +341,8 @@ body {
 }
 
 .output-console {
-    flex: 1;
-    min-height: 400px;
+    height: 400px;
+    max-height: 400px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 8px;

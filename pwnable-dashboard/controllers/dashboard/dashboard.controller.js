@@ -5,6 +5,7 @@ const dashboardService = require('../../services/dashboard/dashboard.service');
 const getaiDataService = require('../../services/dashboard/ais/getaiData.service');
 const trackService = require('../../services/dashboard/ais/track.service');
 const uploadService = require('../../services/dashboard/upload.service');
+const runService = require('../../services/dashboard/building/run.service');
 
 router.get('/', async (req, res) => {
     const dashboardData = await dashboardService.getDashboardData();
@@ -55,6 +56,32 @@ router.get('/ai', async (req, res) => {
         ai: track,
         status: getaiData
     });
+});
+
+router.get('/ai/status', async (req, res) => {
+    const track = await trackService.getTrackData();
+    const getaiData = await getaiDataService.getAIData();
+    return res.status(200).json({
+        ai: track,
+        status: getaiData
+    });
+});
+
+router.post('/ai/run', async (req, res) => {
+    const result = await runService.buildProcess();
+
+    if (result.success) {
+        return res.status(200).render('dashboard/ai', {
+            title: 'AI Dashboard',
+            ai: result.ai,
+            status: result.status
+        });
+    } else {
+        return res.status(500).render('dashboard/error', {
+            title: 'AI Run Error',
+            error: result.error || 'Failed to run AI process.'
+        });
+    }
 });
 
 module.exports = router;
