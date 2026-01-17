@@ -1,1 +1,3 @@
 /pwnable-dashboard/node_modules/*
+/pwnable-dashboard/.env
+/pwnable-dashboard/data/*

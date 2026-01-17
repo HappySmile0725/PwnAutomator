@@ -10,9 +10,9 @@
 <body>
     <%
         const gpuInfo = (dashboard?.hardware?.gpu?.[0]) || { name: 'Unknown', memoryTotal: 0, memoryUsed: 0 };
-        const vramTotal = Number(gpuInfo.memoryTotal) || 0;
+        const vramTotal = Number(gpuInfo.memoryTotal) / 1000 || 0;
         const vramUsed = Number(gpuInfo.memoryUsed) / 1000 || 0;
-        const usagePercent = vramTotal > 0 ? Math.round((Number(gpuInfo.memoryUsed) / vramTotal) * 100) : 0;
+        const usagePercent = vramTotal > 0 ? Math.round((Number(gpuInfo.memoryUsed) / Number(gpuInfo.memoryTotal)) * 100) : 0;
         const usageDeg = usagePercent * 1.8;
         const greenDeg = Math.min(usageDeg, 61.2);
         const yellowDeg = Math.min(usageDeg, 122.4);
