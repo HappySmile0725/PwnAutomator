@@ -1,3 +1,5 @@
 /pwnable-dashboard/node_modules/*
 /pwnable-dashboard/.env
 /pwnable-dashboard/data/*
+/mcps/ghidra_12.0.2_PUBLIC
+/mcps/challenges/*
