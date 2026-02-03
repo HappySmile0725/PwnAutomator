@@ -22,7 +22,9 @@ class GhidraMCP:
         raise Exception(res.get("error"))
     
     # 편의 메서드
-    def meta(self):
+    def meta(self, binary_path=None):
+        if binary_path:
+            return self.call("meta", binary_path=binary_path)
         return self.call("meta")
     
     def functions(self):
