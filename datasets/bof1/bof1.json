@@ -1,0 +1,102 @@
+{
+  "task_id": "bof1",
+  "binary_meta": {
+    "arch": "x86:LE:64:default",
+    "base": "0x400000",
+    "raw_meta": {
+      "name": "chall",
+      "arch": "x86:LE:64:default",
+      "base": "0x400000",
+      "checksec": {
+        "available": true,
+        "result": {
+          "nx": true,
+          "pie": false,
+          "canary": true
+        }
+      },
+      "executable_path": "/path/to/challenge/binary",
+      "commands": [
+        "func.list",
+        "func.name",
+        "func.addr",
+        "mem.hex",
+        "mem.dec",
+        "mem.str",
+        "mem.asm",
+        "decompile.addr",
+        "decompile.name",
+        "search.func",
+        "search.str",
+        "search.bytes",
+        "search.xrefs_to",
+        "search.xrefs_from",
+        "meta",
+        "help"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "action": "enumerate_functions",
+      "tool": "func.list",
+      "output": [
+        {
+          "addr": "0x401140",
+          "name": "main",
+          "has_symbol": true,
+          "size": 175
+        },
+        {
+          "addr": "0x401196",
+          "name": "win",
+          "has_symbol": true,
+          "size": 42
+        }
+      ]
+    },
+    {
+      "action": "inspect_function",
+      "tool": "decompile.name",
+      "input": {
+        "name": "main"
+      },
+      "output": {
+        "name": "main",
+        "addr": "0x401140",
+        "code": "\nundefined8 main(void)\n\n{\n  long in_FS_OFFSET;\n  char buf [72];\n  long canary;\n  \n  canary = *(long *)(in_FS_OFFSET + 0x28);\n  read(0,buf,0x100);\n  printf(\"%s\",buf);\n  if (canary != *(long *)(in_FS_OFFSET + 0x28)) {\n                    /* WARNING: Subroutine does not return */\n    __stack_chk_fail();\n  }\n  return 0;\n}\n"
+      }
+    },
+    {
+      "action": "inspect_function",
+      "tool": "decompile.name",
+      "input": {
+        "name": "win"
+      },
+      "output": {
+        "name": "win",
+        "addr": "0x401196",
+        "code": "\nvoid win(void)\n\n{\n  system(\"/bin/sh\");\n  return;\n}\n"
+      }
+    },
+    {
+      "analysis": {
+        "reason": "This binary has win function and vuln_func function. To execute win function, we need to oversrite return address of vuln_func function. vuln_func exeucutes two read function and print once. So, buffer overflow allows overwriting stack data including canary; printf leaks stack data if null byte overwritten",
+        "stack_object": "buf[72]",
+        "control_flow": "Canary Leaked -> RET overwritten",
+        "vuln_type": "stack buffer overflow"
+      }
+    },
+    {
+      "exploit_plan": {
+        "offset_reason": "72 bytes buffer + 8 bytes Canary + 8 bytes saved RBP",
+        "technique": "ROP",
+        "constraints": [
+          "Canary enabled",
+          "NX enabled",
+          "PIE disabled"
+        ]
+      }
+    }
+  ]
+}
