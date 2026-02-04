@@ -1,3 +1,6 @@
+const dotenv = require('dotenv');
+dotenv.config();
+
 const express = require('express');
 const path = require('path');
 const cookieParser = require('cookie-parser');
@@ -10,10 +13,8 @@ const authRouter = require('./routers/auth/auth.router');
 const checkLogin = require('./middlewares/checkLogin.middleware');
 
 const app = express();
-const dotenv = require('dotenv');
-const HOST = '0.0.0.0';
-const PORT = 3000;
-dotenv.config();
+const HOST = process.env.HOST || '0.0.0.0';
+const PORT = process.env.PORT || 3000;
 
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
@@ -25,14 +26,14 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use(session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: true,
-    cookie: { 
-      maxAge: 24 * 60 * 60 * 1000,
-      secure: false,
-      httpOnly: true,
-    }
+  secret: process.env.SESSION_SECRET || 'fallback_secret_key_12345',
+  resave: false,
+  saveUninitialized: true,
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000,
+    secure: false,
+    httpOnly: true,
+  }
 }));
 
 app.use('/data/storage/history', checkLogin, express.static(path.join(__dirname, 'data', 'storage', 'history'), { index: false }));
