@@ -3,84 +3,123 @@
 
 import socket
 import json
+from fastmcp import FastMCP
 
-class GhidraMCP:
-    def __init__(self, host='127.0.0.1', port=9999):
-        self.host = host
-        self.port = port
-    
-    def call(self, cmd, **args):
+# Define the FastMCP server
+mcp = FastMCP("Ghidra Tools")
+
+HOST = '127.0.0.1'
+PORT = 9999
+
+def call_ghidra(cmd, **kwargs):
+    """Internal helper to communicate with Ghidra socket server"""
+    try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((self.host, self.port))
-        sock.send(json.dumps({"cmd": cmd, "args": args}).encode())
-        data = sock.recv(65536).decode()
+        sock.settimeout(10)  # 10 second timeout
+        sock.connect((HOST, PORT))
+        sock.send(json.dumps({"cmd": cmd, "args": kwargs}).encode())
+        
+        # Read until newline or data ends
+        chunks = []
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if chunk.endswith(b"\n"):
+                break
+        
+        data = b"".join(chunks).decode().strip()
         sock.close()
         
+        if not data:
+            return json.dumps({"status": "error", "message": "No response from Ghidra server"})
+            
         res = json.loads(data)
         if res.get("ok"):
-            return res.get("result")
-        raise Exception(res.get("error"))
-    
-    # 편의 메서드
-    def meta(self, binary_path=None):
-        if binary_path:
-            return self.call("meta", binary_path=binary_path)
-        return self.call("meta")
-    
-    def functions(self):
-        return self.call("func.list")
-    
-    def func(self, name=None, addr=None):
-        if name:
-            return self.call("func.name", name=name)
-        return self.call("func.addr", addr=addr)
-    
-    def hex(self, addr, size=8):
-        return self.call("mem.hex", addr=addr, size=size)
-    
-    def dec(self, addr, size=8):
-        return self.call("mem.dec", addr=addr, size=size)
-    
-    def string(self, addr, maxlen=256):
-        return self.call("mem.str", addr=addr, maxlen=maxlen)
-    
-    def asm(self, addr, count=5):
-        return self.call("mem.asm", addr=addr, count=count)
-    
-    def decompile(self, name=None, addr=None):
-        if name:
-            return self.call("decompile.name", name=name)
-        return self.call("decompile.addr", addr=addr)
-    
-    def search_func(self, pattern):
-        return self.call("search.func", pattern=pattern)
-    
-    def search_str(self, pattern):
-        return self.call("search.str", pattern=pattern)
-    
-    def search_bytes(self, pattern, max=20):
-        return self.call("search.bytes", pattern=pattern, max=max)
-    
-    def xrefs_to(self, addr):
-        return self.call("search.xrefs_to", addr=addr)
-    
-    def xrefs_from(self, addr):
-        return self.call("search.xrefs_from", addr=addr)
+            return json.dumps({"status": "success", "result": res.get("result")})
+        return json.dumps({"status": "error", "message": res.get("error")})
+    except ConnectionRefusedError:
+        return json.dumps({"status": "error", "message": "Could not connect to Ghidra server. Is it running?"})
+    except Exception as e:
+        return json.dumps({"status": "error", "message": f"Communication error: {str(e)}"})
 
+@mcp.tool()
+def get_metadata(binary_path: str = None) -> str:
+    """Get metadata about the currently analyzed binary (arch, pie, etc.)"""
+    if binary_path:
+        return call_ghidra("meta", binary_path=binary_path)
+    return call_ghidra("meta")
+
+@mcp.tool()
+def list_functions() -> str:
+    """List all functions in the binary"""
+    return call_ghidra("func.list")
+
+@mcp.tool()
+def get_function_by_name(name: str) -> str:
+    """Get function detailed info by name (start, end, size, etc.)"""
+    return call_ghidra("func.name", name=name)
+
+@mcp.tool()
+def get_function_by_addr(addr: str) -> str:
+    """Get function detailed info by address"""
+    return call_ghidra("func.addr", addr=addr)
+
+@mcp.tool()
+def read_memory_hex(addr: str, size: int = 8) -> str:
+    """Read memory at address as hex string"""
+    return call_ghidra("mem.hex", addr=addr, size=size)
+
+@mcp.tool()
+def read_memory_decimal(addr: str, size: int = 8) -> str:
+    """Read memory at address as decimal value"""
+    return call_ghidra("mem.dec", addr=addr, size=size)
+
+@mcp.tool()
+def read_string(addr: str, maxlen: int = 256) -> str:
+    """Read string from memory address"""
+    return call_ghidra("mem.str", addr=addr, maxlen=maxlen)
+
+@mcp.tool()
+def read_assembly(addr: str, count: int = 5) -> str:
+    """Read assembly instructions at address"""
+    return call_ghidra("mem.asm", addr=addr, count=count)
+
+@mcp.tool()
+def decompile_address(addr: str) -> str:
+    """Decompile function containing the address"""
+    return call_ghidra("decompile.addr", addr=addr)
+
+@mcp.tool()
+def decompile_function(name: str) -> str:
+    """Decompile function by name"""
+    return call_ghidra("decompile.name", name=name)
+
+@mcp.tool()
+def search_functions(pattern: str) -> str:
+    """Search for functions matching a regex pattern"""
+    return call_ghidra("search.func", pattern=pattern)
+
+@mcp.tool()
+def search_string(pattern: str) -> str:
+    """Search for strings matching a regex pattern"""
+    return call_ghidra("search.str", pattern=pattern)
+
+@mcp.tool()
+def search_bytes(pattern: str, max_results: int = 20) -> str:
+    """Search for byte pattern (e.g. '90 90 ?? E8')"""
+    return call_ghidra("search.bytes", pattern=pattern, max=max_results)
+
+@mcp.tool()
+def get_xrefs_to(addr: str) -> str:
+    """Get cross-references TO an address"""
+    return call_ghidra("search.xrefs_to", addr=addr)
+
+@mcp.tool()
+def get_xrefs_from(addr: str) -> str:
+    """Get cross-references FROM an address"""
+    return call_ghidra("search.xrefs_from", addr=addr)
 
 if __name__ == "__main__":
-    g = GhidraMCP()
-    
-    # example usage
-    print("=== Meta ===")
-    print(g.meta())
-    
-    print("\n=== Functions ===")
-    for f in g.functions():
-        print(f"{f['addr']}\t{f['name']}")
-    
-    print("\n=== Decompile main ===")
-    print(g.decompile(name="main")["code"])
-    
-    print("\n=== Search 'main' ===")
-    print(g.search_func("main"))
+    mcp.run()
