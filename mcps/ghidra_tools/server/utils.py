@@ -63,7 +63,8 @@ class DebugBridgeClient(object):
 
     def _raw_call(self, cmd, args):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3.0)
+        timeout = self._timeout_for(cmd)
+        sock.settimeout(timeout)
         sock.connect((self.host, self.port))
         try:
             wire = (json.dumps({"cmd": cmd, "args": args}) + "\n").encode("utf-8")
@@ -87,6 +88,19 @@ class DebugBridgeClient(object):
             raise Exception(res.get("error"))
         finally:
             sock.close()
+
+    def _timeout_for(self, cmd):
+        # GDB MI commands can legitimately take longer than a short control ping.
+        text = str(cmd or "")
+        if text == "bridge.ping":
+            return 2.0
+        if text in ("debug.open", "debug.attach"):
+            return 30.0
+        if text in ("debug.interrupt", "debug.cont", "debug.stepi", "debug.nexti"):
+            return 20.0
+        if text.startswith("debug.trace."):
+            return 20.0
+        return 10.0
 
     def ensure_alive(self):
         try:

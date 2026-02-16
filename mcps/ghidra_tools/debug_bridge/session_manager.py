@@ -52,6 +52,13 @@ class SessionManager:
         if cmd == "debug.interrupt":
             sess = self._require(args)
             return sess.interrupt()
+        if cmd == "debug.stdin.write":
+            sess = self._require(args)
+            data = args.get("data")
+            if data is None:
+                data = args.get("text", "")
+            append_newline = self._to_bool(args.get("append_newline"), False)
+            return sess.write_stdin(str(data), append_newline=append_newline)
         if cmd == "debug.regs":
             sess = self._require(args)
             return sess.get_registers()
@@ -127,6 +134,7 @@ class SessionManager:
         trace_sync = self._to_bool(args.get("trace_sync"), True)
         trace_required = self._to_bool(args.get("trace_required"), False)
         require_ghidra = self._to_bool(args.get("require_ghidra"), trace_required)
+        auto_run = self._to_bool(args.get("auto_run"), False)
         sess = GdbMISession(
             gdb_path=gdb_path,
             gdb_args=gdb_args,
@@ -146,6 +154,7 @@ class SessionManager:
                 trace_start=trace_start,
                 trace_sync=trace_sync,
                 trace_required=trace_required,
+                auto_run=auto_run,
             )
         except Exception:
             try:

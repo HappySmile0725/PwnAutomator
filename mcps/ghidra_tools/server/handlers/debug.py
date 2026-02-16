@@ -84,6 +84,10 @@ class DebugHandler:
         return ctx.bridge_call("debug.interrupt", args)
 
     @staticmethod
+    def stdin_write(args):
+        return ctx.bridge_call("debug.stdin.write", args)
+
+    @staticmethod
     def regs(args):
         return ctx.bridge_call("debug.regs", args)
 
@@ -146,6 +150,7 @@ COMMANDS = {
     "debug.stepi": DebugHandler.stepi,
     "debug.nexti": DebugHandler.nexti,
     "debug.interrupt": DebugHandler.interrupt,
+    "debug.stdin.write": DebugHandler.stdin_write,
     "debug.regs": DebugHandler.regs,
     "debug.mem": DebugHandler.mem,
     "debug.bt": DebugHandler.bt,

@@ -169,11 +169,25 @@ TOOLS: List[Dict[str, Any]] = [
     _tool(
         "debug_open",
         "Open dynamic debug session. Supports all debug.open args.",
+        properties={
+            "auto_run": {
+                "type": "boolean",
+                "description": "Run target immediately after open (default: false).",
+                "default": False,
+            }
+        },
         additional_properties=True,
     ),
     _tool(
         "debug_open_current",
         "Open dynamic debug session for current program. Supports all debug.open.current args.",
+        properties={
+            "auto_run": {
+                "type": "boolean",
+                "description": "Run target immediately after open (default: false).",
+                "default": False,
+            }
+        },
         additional_properties=True,
     ),
     _tool(
@@ -243,6 +257,16 @@ TOOLS: List[Dict[str, Any]] = [
         "Interrupt execution.",
         properties={"session_id": {"type": "string"}},
         required=["session_id"],
+    ),
+    _tool(
+        "debug_stdin_write",
+        "Write input to inferior stdin.",
+        properties={
+            "session_id": {"type": "string"},
+            "data": {"type": "string"},
+            "append_newline": {"type": "boolean", "default": False},
+        },
+        required=["session_id", "data"],
     ),
     _tool(
         "debug_regs",
@@ -378,6 +402,7 @@ TOOL_TO_COMMAND = {
     "debug_stepi": "debug.stepi",
     "debug_nexti": "debug.nexti",
     "debug_interrupt": "debug.interrupt",
+    "debug_stdin_write": "debug.stdin.write",
     "debug_regs": "debug.regs",
     "debug_mem": "debug.mem",
     "debug_bt": "debug.bt",

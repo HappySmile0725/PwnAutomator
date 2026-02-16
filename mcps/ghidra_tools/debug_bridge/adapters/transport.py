@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import queue
+import signal
 import subprocess
 import threading
 import time
@@ -44,7 +45,7 @@ class GdbMITransport:
         if self.proc is not None:
             return
 
-        argv = [self.gdb_path, "--quiet", "--interpreter=mi2"]
+        argv = [self.gdb_path, "--quiet", "--nx", "--interpreter=mi2"]
         argv.extend(self.gdb_args)
         try:
             self.proc = subprocess.Popen(
@@ -104,6 +105,12 @@ class GdbMITransport:
     def emit_event(self, event: Dict[str, Any]) -> None:
         event["ts"] = time.time()
         self._events.put(event)
+
+    def send_interrupt_signal(self) -> None:
+        self._ensure_alive()
+        assert self.proc is not None
+        self.proc.send_signal(signal.SIGINT)
+        self.emit_event({"type": "command", "name": "sigint_sent"})
 
     def execute(
         self,
