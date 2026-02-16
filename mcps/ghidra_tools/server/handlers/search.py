@@ -25,19 +25,51 @@ class SearchHandler:
     @staticmethod
     def string(args):
         """string search"""
-        from ghidra.program.util import DefinedDataIterator
-        
         pattern = args.get("pattern", "").lower()
+        max_results = args.get("max", 50)
+        try:
+            max_results = int(max_results)
+        except:
+            max_results = 50
+
         result = []
-        
-        for data in DefinedDataIterator.definedStrings(ctx.program):
-            val = str(data.getValue())
+
+        # Avoid version-specific DefinedDataIterator helpers and walk defined data directly.
+        it = ctx.listing.getDefinedData(True)
+        while it.hasNext():
+            data = it.next()
+
+            is_string = False
+            try:
+                is_string = bool(data.hasStringValue())
+            except:
+                is_string = False
+
+            if not is_string:
+                try:
+                    dt_name = str(data.getDataType().getDisplayName()).lower()
+                except:
+                    dt_name = str(data.getDataType()).lower()
+                if ("string" in dt_name) or ("unicode" in dt_name):
+                    is_string = True
+
+            if not is_string:
+                continue
+
+            try:
+                val = str(data.getValue())
+            except:
+                try:
+                    val = str(data.getDefaultValueRepresentation())
+                except:
+                    continue
+
             if pattern in val.lower():
                 result.append({
                     "addr": str(data.getAddress()),
                     "value": val
                 })
-                if len(result) >= 50:  # limit results
+                if len(result) >= max_results:
                     break
         
         return result

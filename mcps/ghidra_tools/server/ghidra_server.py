@@ -19,7 +19,14 @@ from utils import GhidraContext
 GhidraContext.init(currentProgram)
 
 # load handlers
-from handlers import FunctionsHandler, MemoryHandler, DecompileHandler, SearchHandler, MetaHandler
+# Import directly from handler modules to avoid stale Jython package-cache issues
+# (e.g., old handlers/__init__$py.class missing newly added exports).
+from functions import FunctionsHandler
+from memory import MemoryHandler
+from decompile import DecompileHandler
+from search import SearchHandler
+from meta import MetaHandler
+from debug import DebugHandler
 
 # commands setup
 class ServerCommands:
@@ -54,6 +61,34 @@ class ServerCommands:
             
             # Meta
             "meta": MetaHandler.get_meta,
+
+            # Dynamic Debug
+            "debug.open": DebugHandler.open,
+            "debug.open.current": DebugHandler.open_current,
+            "debug.attach": DebugHandler.attach,
+            "debug.close": DebugHandler.close,
+            "debug.list": DebugHandler.list_sessions,
+            "debug.status": DebugHandler.status,
+            "debug.break.set": DebugHandler.break_set,
+            "debug.break.del": DebugHandler.break_del,
+            "debug.break.list": DebugHandler.break_list,
+            "debug.cont": DebugHandler.cont,
+            "debug.stepi": DebugHandler.stepi,
+            "debug.nexti": DebugHandler.nexti,
+            "debug.interrupt": DebugHandler.interrupt,
+            "debug.regs": DebugHandler.regs,
+            "debug.mem": DebugHandler.mem,
+            "debug.bt": DebugHandler.bt,
+            "debug.events.poll": DebugHandler.events_poll,
+            "debug.trace.connect": DebugHandler.trace_connect,
+            "debug.trace.disconnect": DebugHandler.trace_disconnect,
+            "debug.trace.start": DebugHandler.trace_start,
+            "debug.trace.stop": DebugHandler.trace_stop,
+            "debug.trace.sync_enable": DebugHandler.trace_sync_enable,
+            "debug.trace.sync_disable": DebugHandler.trace_sync_disable,
+            "debug.trace.sync_synth_stopped": DebugHandler.trace_sync_synth_stopped,
+            "debug.trace.put_all": DebugHandler.trace_put_all,
+
             "help": self.get_help
         })
         
@@ -77,6 +112,31 @@ class ServerCommands:
             "search.xrefs_to": "find xrefs to address {addr}",
             "search.xrefs_from": "find xrefs from address {addr}",
             "meta": "get binary metadata (includes checksec, optional: {binary_path})",
+            "debug.open": "launch binary under ghidragdb+gdb {binary?, argv?, cwd?, env?, gdb_path?, gdb_args?, trace_rmi_addr?, trace_sync?, trace_start?, trace_required?, require_ghidra?, ghidra_home?, use_ghidra?}",
+            "debug.open.current": "launch current program with ghidragdb+gdb {argv?, cwd?, env?, gdb_path?, gdb_args?, trace_rmi_addr?, trace_sync?, trace_start?, trace_required?, require_ghidra?, ghidra_home?, use_ghidra?}",
+            "debug.attach": "attach pid with ghidragdb+gdb {pid, gdb_path?, gdb_args?, trace_rmi_addr?, trace_sync?, trace_start?, trace_required?, require_ghidra?, ghidra_home?, use_ghidra?}",
+            "debug.close": "close debug session {session_id}",
+            "debug.list": "list debug sessions",
+            "debug.status": "session state {session_id}",
+            "debug.break.set": "set breakpoint {session_id, location}",
+            "debug.break.del": "delete breakpoint {session_id, breakpoint}",
+            "debug.break.list": "list breakpoints {session_id}",
+            "debug.cont": "continue execution {session_id}",
+            "debug.stepi": "step instruction {session_id}",
+            "debug.nexti": "next instruction {session_id}",
+            "debug.interrupt": "interrupt execution {session_id}",
+            "debug.regs": "list register values {session_id}",
+            "debug.mem": "read memory bytes {session_id, addr, size}",
+            "debug.bt": "stack backtrace {session_id, depth?}",
+            "debug.events.poll": "poll async debug events {session_id, max?}",
+            "debug.trace.connect": "connect session to Ghidra TraceRMI {session_id, trace_rmi_addr}",
+            "debug.trace.disconnect": "disconnect trace session {session_id, tolerate_error?}",
+            "debug.trace.start": "start ghidra trace {session_id}",
+            "debug.trace.stop": "stop ghidra trace {session_id, tolerate_error?}",
+            "debug.trace.sync_enable": "enable ghidra trace sync {session_id}",
+            "debug.trace.sync_disable": "disable ghidra trace sync {session_id, tolerate_error?}",
+            "debug.trace.sync_synth_stopped": "synthesize stopped state to trace {session_id, tolerate_error?}",
+            "debug.trace.put_all": "publish inferiors/threads/frames/regs/mem to trace {session_id, tolerate_error?}",
             "help": "show help message"
         }
     
@@ -86,8 +146,11 @@ class ServerCommands:
         return False, "Unknown command: %s" % cmd
 
 # server
-HOST = '127.0.0.1'
-PORT = 9999
+HOST = os.environ.get("GHIDRA_MCP_BIND_HOST", os.environ.get("GHIDRA_HOST", "0.0.0.0"))
+try:
+    PORT = int(os.environ.get("GHIDRA_MCP_BIND_PORT", os.environ.get("GHIDRA_PORT", "9999")))
+except:
+    PORT = 9999
 
 def run_server():
     server_cmds = ServerCommands()
