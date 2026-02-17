@@ -118,7 +118,7 @@ class ServerCommands:
             "debug.stepi": "step instruction {session_id}",
             "debug.nexti": "next instruction {session_id}",
             "debug.interrupt": "interrupt execution {session_id}",
-            "debug.stdin.write": "write input to inferior stdin {session_id, data, append_newline?}",
+            "debug.stdin.write": "write input to inferior stdin {session_id, data, append_newline?, wait_ms?, max_events?}",
             "debug.regs": "list register values {session_id}",
             "debug.mem": "read memory bytes {session_id, addr, size}",
             "debug.bt": "stack backtrace {session_id, depth?}",

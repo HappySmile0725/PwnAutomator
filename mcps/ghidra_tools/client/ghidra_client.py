@@ -179,12 +179,21 @@ class GhidraMCP:
     def debug_interrupt(self, session_id):
         return self.call("debug.interrupt", session_id=session_id)
 
-    def debug_stdin_write(self, session_id, data, append_newline=False):
+    def debug_stdin_write(
+        self,
+        session_id,
+        data,
+        append_newline=False,
+        wait_ms=300,
+        max_events=200,
+    ):
         return self.call(
             "debug.stdin.write",
             session_id=session_id,
             data=data,
             append_newline=append_newline,
+            wait_ms=wait_ms,
+            max_events=max_events,
         )
 
     def debug_regs(self, session_id):

@@ -57,7 +57,14 @@ class SessionManager:
             if data is None:
                 data = args.get("text", "")
             append_newline = self._to_bool(args.get("append_newline"), False)
-            return sess.write_stdin(str(data), append_newline=append_newline)
+            wait_ms = int(args.get("wait_ms", 300) or 300)
+            max_events = int(args.get("max_events", 200) or 200)
+            return sess.write_stdin(
+                str(data),
+                append_newline=append_newline,
+                wait_ms=wait_ms,
+                max_events=max_events,
+            )
         if cmd == "debug.regs":
             sess = self._require(args)
             return sess.get_registers()

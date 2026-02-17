@@ -265,6 +265,18 @@ TOOLS: List[Dict[str, Any]] = [
             "session_id": {"type": "string"},
             "data": {"type": "string"},
             "append_newline": {"type": "boolean", "default": False},
+            "wait_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 300,
+                "description": "Wait for target output/events after write (milliseconds).",
+            },
+            "max_events": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 200,
+                "description": "Max events collected while waiting.",
+            },
         },
         required=["session_id", "data"],
     ),

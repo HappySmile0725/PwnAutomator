@@ -4,9 +4,18 @@
 from __future__ import annotations
 
 import os
+import re
 import select
 import threading
+import time
 from typing import Any, Dict, List, Optional
+
+try:
+    import termios  # type: ignore
+    import tty  # type: ignore
+except Exception:
+    termios = None  # type: ignore
+    tty = None  # type: ignore
 
 try:
     from .errors import GdbMIError
@@ -103,25 +112,41 @@ class GdbMISession:
 
     def set_breakpoint(self, location: str) -> Dict[str, Any]:
         self._ensure_alive()
-        cmd = "-break-insert %s" % quote_mi(location)
-        try:
-            return self._cmd(cmd, timeout=20.0)
-        except GdbMIError as first_exc:
-            # If target is still running/busy, interrupt once and retry.
+        raw = str(location or "").strip()
+        if not raw:
+            raise GdbMIError("breakpoint location is required")
+
+        candidates = self._breakpoint_candidates(raw)
+        errors: List[str] = []
+        for cand in candidates:
+            cmd = "-break-insert %s" % quote_mi(cand)
             try:
-                self.interrupt()
-            except Exception:
-                pass
-            try:
-                return self._cmd(cmd, timeout=20.0)
-            except GdbMIError as second_exc:
-                # Fallback for environments where MI breakpoint insertion stalls intermittently.
-                cli = self._console("break %s" % str(location), tolerate_error=True)
-                return {
-                    "fallback": "console_break",
-                    "warning": "%s; %s" % (str(first_exc), str(second_exc)),
-                    "result": cli,
-                }
+                result = self._cmd(cmd, timeout=20.0)
+                return {"location_used": cand, "result": result}
+            except GdbMIError as first_exc:
+                errors.append("%s: %s" % (cand, str(first_exc)))
+
+                # If target is still running/busy, interrupt once and retry.
+                try:
+                    self.interrupt()
+                    result = self._cmd(cmd, timeout=20.0)
+                    return {"location_used": cand, "result": result}
+                except Exception as second_exc:
+                    errors.append("%s(retry): %s" % (cand, str(second_exc)))
+
+                # Console fallback + post-check: only accept if breakpoint count increased.
+                before = self._breakpoint_count()
+                cli = self._console("break %s" % cand, tolerate_error=True)
+                after = self._breakpoint_count()
+                if after > before:
+                    return {
+                        "location_used": cand,
+                        "fallback": "console_break",
+                        "result": cli,
+                    }
+                errors.append("%s(console): not set" % cand)
+
+        raise GdbMIError("Failed to set breakpoint %s: %s" % (raw, "; ".join(errors)))
 
     def delete_breakpoint(self, breakpoint_id: str) -> Dict[str, Any]:
         self._ensure_alive()
@@ -188,7 +213,13 @@ class GdbMISession:
     def poll_events(self, max_items: int = 20) -> List[Dict[str, Any]]:
         return self.transport.poll_events(max_items=max_items)
 
-    def write_stdin(self, data: str, append_newline: bool = False) -> Dict[str, Any]:
+    def write_stdin(
+        self,
+        data: str,
+        append_newline: bool = False,
+        wait_ms: int = 0,
+        max_events: int = 200,
+    ) -> Dict[str, Any]:
         self._ensure_alive()
         self._setup_inferior_tty()
         if self._tty_master is None:
@@ -200,7 +231,12 @@ class GdbMISession:
         raw = text.encode("utf-8")
         with self._tty_lock:
             written = os.write(self._tty_master, raw)
-        return {"written": int(written)}
+
+        out: Dict[str, Any] = {"written": int(written)}
+        if int(wait_ms) > 0:
+            wait_data = self._collect_events(wait_ms=int(wait_ms), max_events=int(max_events))
+            out.update(wait_data)
+        return out
 
     def ping(self) -> Dict[str, Any]:
         return {"alive": self.transport.is_alive()}
@@ -208,6 +244,63 @@ class GdbMISession:
     def _ensure_alive(self) -> None:
         if not self.transport.is_alive():
             raise GdbMIError("GDB process is not alive")
+
+    @staticmethod
+    def _looks_like_address(location: str) -> bool:
+        text = str(location or "").strip()
+        if re.match(r"^0x[0-9a-fA-F]+$", text):
+            return True
+        if re.match(r"^[0-9]+$", text):
+            return True
+        return False
+
+    def _breakpoint_candidates(self, location: str) -> List[str]:
+        text = str(location or "").strip()
+        if text.startswith("*"):
+            return [text]
+        if self._looks_like_address(text):
+            # For raw addresses gdb expects "*0x...".
+            return ["*%s" % text, text]
+        return [text]
+
+    def _breakpoint_count(self) -> int:
+        try:
+            result = self._cmd("-break-list", tolerate_error=True)
+            payload = str(result.get("payload") or "")
+            return len(re.findall(r'number="[^"]+"', payload))
+        except Exception:
+            return 0
+
+    def _collect_events(self, wait_ms: int, max_events: int) -> Dict[str, Any]:
+        deadline = time.time() + (max(0, int(wait_ms)) / 1000.0)
+        limit = max(1, int(max_events))
+        events: List[Dict[str, Any]] = []
+        chunks: List[str] = []
+        stopped = False
+
+        while time.time() < deadline and len(events) < limit:
+            batch_limit = min(32, limit - len(events))
+            polled = self.poll_events(max_items=batch_limit)
+            if not polled:
+                time.sleep(0.02)
+                continue
+
+            for ev in polled:
+                events.append(ev)
+                if ev.get("type") == "target_io":
+                    data = ev.get("data")
+                    if isinstance(data, str) and data:
+                        chunks.append(data)
+                if ev.get("type") == "exec" and ev.get("class") == "stopped":
+                    stopped = True
+            if stopped:
+                break
+
+        return {
+            "events": events,
+            "stdout": "".join(chunks),
+            "stopped": bool(stopped),
+        }
 
     def _setup_inferior_tty(self) -> None:
         if os.name == "nt":
@@ -217,6 +310,18 @@ class GdbMISession:
 
         master_fd, slave_fd = os.openpty()
         slave_path = os.ttyname(slave_fd)
+
+        # Canonical TTY buffers until newline; raw mode makes stdin behave like a byte stream.
+        if tty is not None and termios is not None:
+            try:
+                tty.setraw(slave_fd)
+                attrs = termios.tcgetattr(slave_fd)
+                attrs[6][termios.VMIN] = 1
+                attrs[6][termios.VTIME] = 0
+                termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
+            except Exception:
+                pass
+
         self._cmd("-inferior-tty-set %s" % quote_mi(slave_path), tolerate_error=True)
         os.close(slave_fd)
 
