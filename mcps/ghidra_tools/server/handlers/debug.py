@@ -103,38 +103,6 @@ class DebugHandler:
     def events_poll(args):
         return ctx.bridge_call("debug.events.poll", args)
 
-    @staticmethod
-    def trace_connect(args):
-        return ctx.bridge_call("debug.trace.connect", args)
-
-    @staticmethod
-    def trace_disconnect(args):
-        return ctx.bridge_call("debug.trace.disconnect", args)
-
-    @staticmethod
-    def trace_start(args):
-        return ctx.bridge_call("debug.trace.start", args)
-
-    @staticmethod
-    def trace_stop(args):
-        return ctx.bridge_call("debug.trace.stop", args)
-
-    @staticmethod
-    def trace_sync_enable(args):
-        return ctx.bridge_call("debug.trace.sync_enable", args)
-
-    @staticmethod
-    def trace_sync_disable(args):
-        return ctx.bridge_call("debug.trace.sync_disable", args)
-
-    @staticmethod
-    def trace_sync_synth_stopped(args):
-        return ctx.bridge_call("debug.trace.sync_synth_stopped", args)
-
-    @staticmethod
-    def trace_put_all(args):
-        return ctx.bridge_call("debug.trace.put_all", args)
-
 
 COMMANDS = {
     "debug.open": DebugHandler.open,
@@ -155,12 +123,4 @@ COMMANDS = {
     "debug.mem": DebugHandler.mem,
     "debug.bt": DebugHandler.bt,
     "debug.events.poll": DebugHandler.events_poll,
-    "debug.trace.connect": DebugHandler.trace_connect,
-    "debug.trace.disconnect": DebugHandler.trace_disconnect,
-    "debug.trace.start": DebugHandler.trace_start,
-    "debug.trace.stop": DebugHandler.trace_stop,
-    "debug.trace.sync_enable": DebugHandler.trace_sync_enable,
-    "debug.trace.sync_disable": DebugHandler.trace_sync_disable,
-    "debug.trace.sync_synth_stopped": DebugHandler.trace_sync_synth_stopped,
-    "debug.trace.put_all": DebugHandler.trace_put_all,
 }

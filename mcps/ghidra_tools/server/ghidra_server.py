@@ -81,14 +81,6 @@ class ServerCommands:
             "debug.mem": DebugHandler.mem,
             "debug.bt": DebugHandler.bt,
             "debug.events.poll": DebugHandler.events_poll,
-            "debug.trace.connect": DebugHandler.trace_connect,
-            "debug.trace.disconnect": DebugHandler.trace_disconnect,
-            "debug.trace.start": DebugHandler.trace_start,
-            "debug.trace.stop": DebugHandler.trace_stop,
-            "debug.trace.sync_enable": DebugHandler.trace_sync_enable,
-            "debug.trace.sync_disable": DebugHandler.trace_sync_disable,
-            "debug.trace.sync_synth_stopped": DebugHandler.trace_sync_synth_stopped,
-            "debug.trace.put_all": DebugHandler.trace_put_all,
 
             "help": self.get_help
         })
@@ -113,9 +105,9 @@ class ServerCommands:
             "search.xrefs_to": "find xrefs to address {addr}",
             "search.xrefs_from": "find xrefs from address {addr}",
             "meta": "get binary metadata (includes checksec, optional: {binary_path})",
-            "debug.open": "launch binary under ghidragdb+gdb {binary?, argv?, cwd?, env?, gdb_path?, gdb_args?, trace_rmi_addr?, trace_sync?, trace_start?, trace_required?, require_ghidra?, ghidra_home?, use_ghidra?, auto_run?}",
-            "debug.open.current": "launch current program with ghidragdb+gdb {argv?, cwd?, env?, gdb_path?, gdb_args?, trace_rmi_addr?, trace_sync?, trace_start?, trace_required?, require_ghidra?, ghidra_home?, use_ghidra?, auto_run?}",
-            "debug.attach": "attach pid with ghidragdb+gdb {pid, gdb_path?, gdb_args?, trace_rmi_addr?, trace_sync?, trace_start?, trace_required?, require_ghidra?, ghidra_home?, use_ghidra?}",
+            "debug.open": "launch binary under gdb/mi {binary?, argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
+            "debug.open.current": "launch current program with gdb/mi {argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
+            "debug.attach": "attach pid with gdb/mi {pid, gdb_path?, gdb_args?}",
             "debug.close": "close debug session {session_id}",
             "debug.list": "list debug sessions",
             "debug.status": "session state {session_id}",
@@ -131,14 +123,6 @@ class ServerCommands:
             "debug.mem": "read memory bytes {session_id, addr, size}",
             "debug.bt": "stack backtrace {session_id, depth?}",
             "debug.events.poll": "poll async debug events {session_id, max?}",
-            "debug.trace.connect": "connect session to Ghidra TraceRMI {session_id, trace_rmi_addr}",
-            "debug.trace.disconnect": "disconnect trace session {session_id, tolerate_error?}",
-            "debug.trace.start": "start ghidra trace {session_id}",
-            "debug.trace.stop": "stop ghidra trace {session_id, tolerate_error?}",
-            "debug.trace.sync_enable": "enable ghidra trace sync {session_id}",
-            "debug.trace.sync_disable": "disable ghidra trace sync {session_id, tolerate_error?}",
-            "debug.trace.sync_synth_stopped": "synthesize stopped state to trace {session_id, tolerate_error?}",
-            "debug.trace.put_all": "publish inferiors/threads/frames/regs/mem to trace {session_id, tolerate_error?}",
             "help": "show help message"
         }
     

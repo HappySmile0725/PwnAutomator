@@ -93,13 +93,6 @@ class GhidraMCP:
         env=None,
         gdb_path=None,
         gdb_args=None,
-        trace_rmi_addr=None,
-        trace_sync=None,
-        trace_start=None,
-        trace_required=None,
-        require_ghidra=None,
-        ghidra_home=None,
-        use_ghidra=None,
         auto_run=None,
     ):
         payload = {}
@@ -115,20 +108,6 @@ class GhidraMCP:
             payload["gdb_path"] = gdb_path
         if gdb_args is not None:
             payload["gdb_args"] = gdb_args
-        if trace_rmi_addr is not None:
-            payload["trace_rmi_addr"] = trace_rmi_addr
-        if trace_sync is not None:
-            payload["trace_sync"] = trace_sync
-        if trace_start is not None:
-            payload["trace_start"] = trace_start
-        if trace_required is not None:
-            payload["trace_required"] = trace_required
-        if require_ghidra is not None:
-            payload["require_ghidra"] = require_ghidra
-        if ghidra_home is not None:
-            payload["ghidra_home"] = ghidra_home
-        if use_ghidra is not None:
-            payload["use_ghidra"] = use_ghidra
         if auto_run is not None:
             payload["auto_run"] = auto_run
         return self.call("debug.open", **payload)
@@ -140,13 +119,6 @@ class GhidraMCP:
         env=None,
         gdb_path=None,
         gdb_args=None,
-        trace_rmi_addr=None,
-        trace_sync=None,
-        trace_start=None,
-        trace_required=None,
-        require_ghidra=None,
-        ghidra_home=None,
-        use_ghidra=None,
         auto_run=None,
     ):
         payload = {}
@@ -160,20 +132,6 @@ class GhidraMCP:
             payload["gdb_path"] = gdb_path
         if gdb_args is not None:
             payload["gdb_args"] = gdb_args
-        if trace_rmi_addr is not None:
-            payload["trace_rmi_addr"] = trace_rmi_addr
-        if trace_sync is not None:
-            payload["trace_sync"] = trace_sync
-        if trace_start is not None:
-            payload["trace_start"] = trace_start
-        if trace_required is not None:
-            payload["trace_required"] = trace_required
-        if require_ghidra is not None:
-            payload["require_ghidra"] = require_ghidra
-        if ghidra_home is not None:
-            payload["ghidra_home"] = ghidra_home
-        if use_ghidra is not None:
-            payload["use_ghidra"] = use_ghidra
         if auto_run is not None:
             payload["auto_run"] = auto_run
         return self.call("debug.open.current", **payload)
@@ -183,33 +141,12 @@ class GhidraMCP:
         pid,
         gdb_path=None,
         gdb_args=None,
-        trace_rmi_addr=None,
-        trace_sync=None,
-        trace_start=None,
-        trace_required=None,
-        require_ghidra=None,
-        ghidra_home=None,
-        use_ghidra=None,
     ):
         payload = {"pid": pid}
         if gdb_path is not None:
             payload["gdb_path"] = gdb_path
         if gdb_args is not None:
             payload["gdb_args"] = gdb_args
-        if trace_rmi_addr is not None:
-            payload["trace_rmi_addr"] = trace_rmi_addr
-        if trace_sync is not None:
-            payload["trace_sync"] = trace_sync
-        if trace_start is not None:
-            payload["trace_start"] = trace_start
-        if trace_required is not None:
-            payload["trace_required"] = trace_required
-        if require_ghidra is not None:
-            payload["require_ghidra"] = require_ghidra
-        if ghidra_home is not None:
-            payload["ghidra_home"] = ghidra_home
-        if use_ghidra is not None:
-            payload["use_ghidra"] = use_ghidra
         return self.call("debug.attach", **payload)
 
     def debug_close(self, session_id):
@@ -261,34 +198,6 @@ class GhidraMCP:
 
     def debug_events(self, session_id, max=20):
         return self.call("debug.events.poll", session_id=session_id, max=max)
-
-    def debug_trace_connect(self, session_id, trace_rmi_addr):
-        return self.call("debug.trace.connect", session_id=session_id, trace_rmi_addr=trace_rmi_addr)
-
-    def debug_trace_disconnect(self, session_id, tolerate_error=False):
-        return self.call("debug.trace.disconnect", session_id=session_id, tolerate_error=tolerate_error)
-
-    def debug_trace_start(self, session_id):
-        return self.call("debug.trace.start", session_id=session_id)
-
-    def debug_trace_stop(self, session_id, tolerate_error=False):
-        return self.call("debug.trace.stop", session_id=session_id, tolerate_error=tolerate_error)
-
-    def debug_trace_sync_enable(self, session_id):
-        return self.call("debug.trace.sync_enable", session_id=session_id)
-
-    def debug_trace_sync_disable(self, session_id, tolerate_error=False):
-        return self.call("debug.trace.sync_disable", session_id=session_id, tolerate_error=tolerate_error)
-
-    def debug_trace_sync_synth_stopped(self, session_id, tolerate_error=False):
-        return self.call(
-            "debug.trace.sync_synth_stopped",
-            session_id=session_id,
-            tolerate_error=tolerate_error,
-        )
-
-    def debug_trace_put_all(self, session_id, tolerate_error=False):
-        return self.call("debug.trace.put_all", session_id=session_id, tolerate_error=tolerate_error)
 
 
 if __name__ == "__main__":

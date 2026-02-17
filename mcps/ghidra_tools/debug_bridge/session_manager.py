@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 import threading
 import uuid
 from typing import Any, Dict
@@ -71,35 +70,6 @@ class SessionManager:
             sess = self._require(args)
             depth = int(args.get("depth", 32))
             return sess.backtrace(depth)
-        if cmd == "debug.trace.connect":
-            sess = self._require(args)
-            addr = args.get("trace_rmi_addr") or args.get("address")
-            if not addr:
-                raise ValueError("trace_rmi_addr is required")
-            return sess.trace_connect(str(addr))
-        if cmd == "debug.trace.disconnect":
-            sess = self._require(args)
-            return sess.trace_disconnect(tolerate_error=self._to_bool(args.get("tolerate_error"), False))
-        if cmd == "debug.trace.start":
-            sess = self._require(args)
-            return sess.trace_start()
-        if cmd == "debug.trace.stop":
-            sess = self._require(args)
-            return sess.trace_stop(tolerate_error=self._to_bool(args.get("tolerate_error"), False))
-        if cmd == "debug.trace.sync_enable":
-            sess = self._require(args)
-            return sess.trace_sync_enable()
-        if cmd == "debug.trace.sync_disable":
-            sess = self._require(args)
-            return sess.trace_sync_disable(tolerate_error=self._to_bool(args.get("tolerate_error"), False))
-        if cmd == "debug.trace.sync_synth_stopped":
-            sess = self._require(args)
-            return sess.trace_sync_synth_stopped(
-                tolerate_error=self._to_bool(args.get("tolerate_error"), False)
-            )
-        if cmd == "debug.trace.put_all":
-            sess = self._require(args)
-            return sess.trace_put_all(tolerate_error=self._to_bool(args.get("tolerate_error"), False))
         if cmd == "debug.events.poll":
             sess = self._require(args)
             max_items = int(args.get("max", 20))
@@ -127,21 +97,10 @@ class SessionManager:
         env = args.get("env")
         gdb_path = args.get("gdb_path") or "gdb"
         gdb_args = args.get("gdb_args") or []
-        ghidra_home = args.get("ghidra_home")
-        use_ghidra = self._to_bool(args.get("use_ghidra"), True)
-        trace_rmi_addr = args.get("trace_rmi_addr") or os.environ.get("GHIDRA_TRACE_RMI_ADDR")
-        trace_start = self._to_bool(args.get("trace_start"), True)
-        trace_sync = self._to_bool(args.get("trace_sync"), True)
-        trace_required = self._to_bool(args.get("trace_required"), False)
-        require_ghidra = self._to_bool(args.get("require_ghidra"), trace_required)
         auto_run = self._to_bool(args.get("auto_run"), False)
         sess = GdbMISession(
             gdb_path=gdb_path,
             gdb_args=gdb_args,
-            ghidra_home=ghidra_home,
-            use_ghidra=use_ghidra,
-            require_ghidra=require_ghidra,
-            trace_rmi_addr=trace_rmi_addr,
         )
         try:
             sess.start()
@@ -150,10 +109,6 @@ class SessionManager:
                 argv=argv,
                 cwd=cwd,
                 env=env,
-                trace_rmi_addr=trace_rmi_addr,
-                trace_start=trace_start,
-                trace_sync=trace_sync,
-                trace_required=trace_required,
                 auto_run=auto_run,
             )
         except Exception:
@@ -173,30 +128,13 @@ class SessionManager:
             raise ValueError("pid is required")
         gdb_path = args.get("gdb_path") or "gdb"
         gdb_args = args.get("gdb_args") or []
-        ghidra_home = args.get("ghidra_home")
-        use_ghidra = self._to_bool(args.get("use_ghidra"), True)
-        trace_rmi_addr = args.get("trace_rmi_addr") or os.environ.get("GHIDRA_TRACE_RMI_ADDR")
-        trace_start = self._to_bool(args.get("trace_start"), True)
-        trace_sync = self._to_bool(args.get("trace_sync"), True)
-        trace_required = self._to_bool(args.get("trace_required"), False)
-        require_ghidra = self._to_bool(args.get("require_ghidra"), trace_required)
         sess = GdbMISession(
             gdb_path=gdb_path,
             gdb_args=gdb_args,
-            ghidra_home=ghidra_home,
-            use_ghidra=use_ghidra,
-            require_ghidra=require_ghidra,
-            trace_rmi_addr=trace_rmi_addr,
         )
         try:
             sess.start()
-            res = sess.attach_target(
-                int(pid),
-                trace_rmi_addr=trace_rmi_addr,
-                trace_start=trace_start,
-                trace_sync=trace_sync,
-                trace_required=trace_required,
-            )
+            res = sess.attach_target(int(pid))
         except Exception:
             try:
                 sess.close()

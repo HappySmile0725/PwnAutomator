@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backward-compatible facade for GDB/MI + Ghidra Trace adapter."""
+"""Backward-compatible facade for the GDB/MI adapter."""
 
 from __future__ import annotations
 

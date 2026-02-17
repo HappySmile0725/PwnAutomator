@@ -302,72 +302,6 @@ TOOLS: List[Dict[str, Any]] = [
         },
         required=["session_id"],
     ),
-    _tool(
-        "debug_trace_connect",
-        "Connect debug session to Ghidra TraceRMI.",
-        properties={
-            "session_id": {"type": "string"},
-            "trace_rmi_addr": {"type": "string"},
-        },
-        required=["session_id", "trace_rmi_addr"],
-    ),
-    _tool(
-        "debug_trace_disconnect",
-        "Disconnect Ghidra TraceRMI session.",
-        properties={
-            "session_id": {"type": "string"},
-            "tolerate_error": {"type": "boolean", "default": False},
-        },
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_trace_start",
-        "Start Ghidra trace.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_trace_stop",
-        "Stop Ghidra trace.",
-        properties={
-            "session_id": {"type": "string"},
-            "tolerate_error": {"type": "boolean", "default": False},
-        },
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_trace_sync_enable",
-        "Enable trace sync.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_trace_sync_disable",
-        "Disable trace sync.",
-        properties={
-            "session_id": {"type": "string"},
-            "tolerate_error": {"type": "boolean", "default": False},
-        },
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_trace_sync_synth_stopped",
-        "Synthesize stopped state into trace.",
-        properties={
-            "session_id": {"type": "string"},
-            "tolerate_error": {"type": "boolean", "default": False},
-        },
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_trace_put_all",
-        "Publish inferiors/threads/frames/registers/memory to trace.",
-        properties={
-            "session_id": {"type": "string"},
-            "tolerate_error": {"type": "boolean", "default": False},
-        },
-        required=["session_id"],
-    ),
 ]
 
 
@@ -407,14 +341,6 @@ TOOL_TO_COMMAND = {
     "debug_mem": "debug.mem",
     "debug_bt": "debug.bt",
     "debug_events_poll": "debug.events.poll",
-    "debug_trace_connect": "debug.trace.connect",
-    "debug_trace_disconnect": "debug.trace.disconnect",
-    "debug_trace_start": "debug.trace.start",
-    "debug_trace_stop": "debug.trace.stop",
-    "debug_trace_sync_enable": "debug.trace.sync_enable",
-    "debug_trace_sync_disable": "debug.trace.sync_disable",
-    "debug_trace_sync_synth_stopped": "debug.trace.sync_synth_stopped",
-    "debug_trace_put_all": "debug.trace.put_all",
 }
 
 

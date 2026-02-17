@@ -98,8 +98,6 @@ class DebugBridgeClient(object):
             return 30.0
         if text in ("debug.interrupt", "debug.cont", "debug.stepi", "debug.nexti"):
             return 20.0
-        if text.startswith("debug.trace."):
-            return 20.0
         return 10.0
 
     def ensure_alive(self):
