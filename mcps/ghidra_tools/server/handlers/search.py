@@ -77,7 +77,7 @@ class SearchHandler:
     @staticmethod
     def bytes_pattern(args):
         """specific byte pattern search"""
-        from ghidra.program.model.mem import MemoryBytePatternSearcher
+        # from ghidra.program.model.mem import MemoryBytePatternSearcher (removed: valid in some versions but ctx.mem.findBytes is safer)
         
         pattern = args.get("pattern")  # ex: "90 90 90"
         max_results = args.get("max", 20)

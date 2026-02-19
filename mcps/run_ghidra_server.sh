@@ -7,7 +7,7 @@ PROJECT_DIR="challenge"
 PROJECT_NAME="test"
 SCRIPT_PATH="./ghidra_tools/server"
 POST_SCRIPT="ghidra_server.py"
-DEBUG_SERVER="./ghidra_tools/debug_bridge/server.py"
+DEBUG_SERVER="./ghidra_tools/gdb_server/server.py"
 BINARY_PATH="${1:-./test/chall}"
 PROGRAM_NAME="$(basename "$BINARY_PATH")"
 HPORT=9999
@@ -33,7 +33,9 @@ has_program() {
 kill_port "$DPORT"
 kill_port "$HPORT"
 
-nohup python3 "$DEBUG_SERVER" --host 0.0.0.0 --port "$DPORT" >/dev/null 2>&1 &
+# Launch GDB In-Process Server (headless)
+# It binds to 0.0.0.0:19090 by default
+gdb --quiet -x "$DEBUG_SERVER" &
 echo $! > "$DBG_PID"
 
 MODE=(-process "$PROGRAM_NAME")
@@ -42,7 +44,11 @@ if ! has_program; then
   MODE=(-import "$BINARY_PATH")
 fi
 
-nohup env \
+# Remove potential project lock file
+rm -f "${PROJECT_DIR}/${PROJECT_NAME}.lock"
+rm -f "${PROJECT_DIR}/${PROJECT_NAME}.rep/*.lock"
+
+env \
   GHIDRA_MCP_BIND_HOST="0.0.0.0" \
   GHIDRA_MCP_BIND_PORT="$HPORT" \
   GHIDRA_MCP_DEBUG_BIND_HOST="0.0.0.0" \
@@ -50,7 +56,7 @@ nohup env \
   GHIDRA_MCP_DEBUG_HOST="127.0.0.1" \
   GHIDRA_MCP_DEBUG_PORT="19090" \
   "$ANALYZE" "$PROJECT_DIR" "$PROJECT_NAME" "${MODE[@]}" \
-  -scriptPath "$SCRIPT_PATH" -postScript "$POST_SCRIPT" >/dev/null 2>&1 &
+  -scriptPath "$SCRIPT_PATH" -postScript "$POST_SCRIPT" &
 echo $! > "$HEADLESS_PID"
 
 stop_pid_file() {

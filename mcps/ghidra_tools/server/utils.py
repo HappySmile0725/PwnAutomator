@@ -5,6 +5,60 @@ import socket
 import subprocess
 import time
 import jarray
+from ghidra.app.decompiler import DecompInterface
+
+class GhidraContext(object):
+    program = None
+    fm = None
+    mem = None
+    listing = None
+    addr_factory = None
+    decomp = None
+    bridge_client = None
+    
+    @staticmethod
+    def init(program):
+        GhidraContext.program = program
+        GhidraContext.fm = program.getFunctionManager()
+        GhidraContext.mem = program.getMemory()
+        GhidraContext.listing = program.getListing()
+        GhidraContext.addr_factory = program.getAddressFactory()
+        
+        # Decompiler setup
+        GhidraContext.decomp = DecompInterface()
+        GhidraContext.decomp.openProgram(program)
+        
+        # Debug Bridge setup
+        GhidraContext.bridge_client = DebugBridgeClient()
+
+    @staticmethod
+    def bridge_call(cmd, args):
+        if not GhidraContext.bridge_client:
+             return {"ok": False, "error": "Bridge client not initialized"}
+        return GhidraContext.bridge_client.call(cmd, args)
+
+    @staticmethod
+    def addr(addr_str):
+        if isinstance(addr_str, int) or isinstance(addr_str, long):
+            return GhidraContext.addr_factory.getDefaultAddressSpace().getAddress(addr_str)
+        try:
+            # Handle hex strings
+            if str(addr_str).startswith("0x"):
+                val = long(addr_str, 16)
+                return GhidraContext.addr_factory.getDefaultAddressSpace().getAddress(val)
+            # Try parsing as address string
+            return GhidraContext.addr_factory.getAddress(str(addr_str))
+        except:
+             # Fallback to default space
+             return GhidraContext.addr_factory.getDefaultAddressSpace().getAddress(str(addr_str))
+
+    @staticmethod
+    def read_bytes(addr, size):
+        # Ghidra getBytes returns signed byte array
+        buf = jarray.zeros(size, "b")
+        GhidraContext.mem.getBytes(addr, buf)
+        # Convert to unsigned python list/bytes
+        return [(b & 0xff) for b in buf]
 
 
 def _normalize_connect_host(host):
@@ -13,165 +67,86 @@ def _normalize_connect_host(host):
         return "127.0.0.1"
     return text
 
-
 class DebugBridgeClient(object):
-    """Python3 debug bridge client for Jython runtime."""
-
-    def __init__(self, host='127.0.0.1', port=19090, auto_start=True, bind_host='0.0.0.0'):
-        self.host = _normalize_connect_host(host)
-        self.bind_host = str(bind_host or "0.0.0.0")
-        self.port = int(port)
+    def __init__(self, host=None, port=None, auto_start=True, bind_host='0.0.0.0'):
+        # Prefer env vars if not explicitly passed
+        env_host = os.environ.get("GHIDRA_MCP_DEBUG_HOST", "127.0.0.1")
+        env_port = int(os.environ.get("GHIDRA_MCP_DEBUG_PORT", 19090))
+        
+        self.host = _normalize_connect_host(host or env_host)
+        self.port = port or env_port
+        
+        self.bind_host = bind_host
+        self.proc = None
         self.auto_start = auto_start
 
-    def _bridge_script_path(self):
-        base = os.path.dirname(os.path.abspath(__file__))
-        return os.path.normpath(os.path.join(base, "..", "debug_bridge", "server.py"))
-
-    def _python_candidates(self):
-        out = []
-        env_py = os.environ.get("GHIDRA_MCP_PYTHON")
-        if env_py:
-            out.append([env_py])
-
-        if os.name == "nt":
-            out.append(["py", "-3"])
-
-        out.append(["python3"])
-        out.append(["python"])
-        return out
-
     def _spawn_bridge(self):
-        script = self._bridge_script_path()
-        if not os.path.exists(script):
-            return False
-
-        cwd = os.path.dirname(script)
-        devnull = open(os.devnull, "w")
-        try:
-            for cmd in self._python_candidates():
-                argv = cmd + [script, "--host", self.bind_host, "--port", str(self.port)]
-                try:
-                    subprocess.Popen(argv, cwd=cwd, stdout=devnull, stderr=devnull)
-                    time.sleep(0.35)
-                    return True
-                except:
-                    continue
-        finally:
-            devnull.close()
-
-        return False
+        base = os.path.dirname(os.path.abspath(__file__))
+        server_script = os.path.normpath(os.path.join(base, "..", "gdb_server", "server.py"))
+        
+        # We are already in WSL/Linux, so just run gdb
+        cmd = ["gdb", "--quiet", "-x", server_script]
+        cwd = os.path.dirname(server_script)
+        
+        self.proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE)
+        time.sleep(2.0)
+        return True
 
     def _raw_call(self, cmd, args):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        timeout = self._timeout_for(cmd)
+        timeout = 5.0
         sock.settimeout(timeout)
-        sock.connect((self.host, self.port))
-        try:
-            wire = (json.dumps({"cmd": cmd, "args": args}) + "\n").encode("utf-8")
-            sock.sendall(wire)
 
-            chunks = []
+        # Force localhost if target is 0.0.0.0 (connect side)
+        connect_host = self.host
+        if connect_host == "0.0.0.0": connect_host = "127.0.0.1"
+
+        try:
+            sock.connect((connect_host, self.port))
+            req = json.dumps({"cmd": cmd, "args": args}) + "\n"
+            sock.sendall(req.encode('utf-8'))
+
+            resp_data = ""
             while True:
-                data = sock.recv(65536)
-                if not data:
+                chunk = sock.recv(4096)
+                if not chunk:
                     break
-                chunks.append(data)
-                if b"\n" in data:
+                resp_data += chunk.decode('utf-8')
+                if "\n" in resp_data:
                     break
-            raw = b"".join(chunks).decode("utf-8").strip()
-            if not raw:
-                raise Exception("debug bridge empty response")
-
-            res = json.loads(raw)
-            if res.get("ok"):
-                return res.get("result")
-            raise Exception(res.get("error"))
-        finally:
+            
             sock.close()
+            return json.loads(resp_data.strip())
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
-    def _timeout_for(self, cmd):
-        # GDB MI commands can legitimately take longer than a short control ping.
-        text = str(cmd or "")
-        if text == "bridge.ping":
-            return 2.0
-        if text in ("debug.open", "debug.attach"):
-            return 30.0
-        if text in ("debug.interrupt", "debug.cont", "debug.stepi", "debug.nexti"):
-            return 20.0
-        return 10.0
-
-    def ensure_alive(self):
-        try:
-            self._raw_call("bridge.ping", {})
-            return
-        except:
-            pass
-
-        if not self.auto_start:
-            raise Exception("debug bridge is not running")
-
-        if not self._spawn_bridge():
-            raise Exception("failed to start debug bridge")
-
-        last_err = None
-        for _ in range(12):
+    def _ensure_bridge(self):
+        # Force localhost if target is 0.0.0.0
+        connect_host = self.host
+        if connect_host == "0.0.0.0": connect_host = "127.0.0.1"
+        
+        # Try checking multiple times to avoid false negatives
+        for i in range(3):
             try:
-                self._raw_call("bridge.ping", {})
-                return
-            except Exception as e:
-                last_err = str(e)
-                time.sleep(0.25)
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(1.0) # Increased timeout
+                result = s.connect_ex((connect_host, self.port))
+                s.close()
 
-        raise Exception("debug bridge startup timeout: %s" % last_err)
+                if result == 0:
+                    return True
+                
+                time.sleep(0.1)
+            except:
+                pass
+        
+        if self.auto_start:
+            print("[utils] Bridge not responding, spawning new instance...")
+            return self._spawn_bridge()
+            
+        return False
 
     def call(self, cmd, args):
-        self.ensure_alive()
-        return self._raw_call(cmd, args or {})
-
-
-class GhidraContext:
-    program = None
-    mem = None
-    listing = None
-    fm = None
-    af = None
-    decomp = None
-    dbg = None
-
-    @classmethod
-    def init(cls, currentProgram):
-        from ghidra.app.decompiler import DecompInterface
-
-        cls.program = currentProgram
-        cls.mem = currentProgram.getMemory()
-        cls.listing = currentProgram.getListing()
-        cls.fm = currentProgram.getFunctionManager()
-        cls.af = currentProgram.getAddressFactory()
-        cls.decomp = DecompInterface()
-        cls.decomp.openProgram(currentProgram)
-
-        dbg_host = os.environ.get("GHIDRA_MCP_DEBUG_HOST", "127.0.0.1")
-        dbg_bind_host = os.environ.get("GHIDRA_MCP_DEBUG_BIND_HOST", "0.0.0.0")
-        try:
-            dbg_port = int(os.environ.get("GHIDRA_MCP_DEBUG_PORT", "19090"))
-        except:
-            dbg_port = 19090
-        cls.dbg = DebugBridgeClient(dbg_host, dbg_port, auto_start=True, bind_host=dbg_bind_host)
-
-    @classmethod
-    def addr(cls, s):
-        """str to Address convert"""
-        return cls.af.getAddress(s)
-
-    @classmethod
-    def read_bytes(cls, addr, size):
-        """read byte array from memory"""
-        data = jarray.zeros(size, 'b')
-        cls.mem.getBytes(addr, data)
-        return [(b & 0xff) for b in data]
-
-    @classmethod
-    def bridge_call(cls, cmd, args):
-        if cls.dbg is None:
-            raise Exception("Debug bridge is not initialized")
-        return cls.dbg.call(cmd, args or {})
+        if not self._ensure_bridge():
+             return {"ok": False, "error": "Bridge not running"}
+        return self._raw_call(cmd, args)

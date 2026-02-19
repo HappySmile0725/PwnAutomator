@@ -314,6 +314,18 @@ TOOLS: List[Dict[str, Any]] = [
         },
         required=["session_id"],
     ),
+    _tool(
+        "debug_context",
+        "Get comprehensive debug context (registers, code, stack) similar to Pwndbg.",
+        properties={"session_id": {"type": "string"}},
+        required=["session_id"],
+    ),
+    _tool(
+        "debug_read_stdout",
+        "Read stdout/stderr output from the inferior process.",
+        properties={},
+        required=[],
+    ),
 ]
 
 
@@ -353,6 +365,8 @@ TOOL_TO_COMMAND = {
     "debug_mem": "debug.mem",
     "debug_bt": "debug.bt",
     "debug_events_poll": "debug.events.poll",
+    "debug_context": "debug.context",
+    "debug_read_stdout": "debug.read_stdout",
 }
 
 

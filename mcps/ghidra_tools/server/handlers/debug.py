@@ -100,6 +100,10 @@ class DebugHandler:
         return ctx.bridge_call("debug.bt", args)
 
     @staticmethod
+    def context(args):
+        return ctx.bridge_call("debug.context", args)
+
+    @staticmethod
     def events_poll(args):
         return ctx.bridge_call("debug.events.poll", args)
 
@@ -123,4 +127,5 @@ COMMANDS = {
     "debug.mem": DebugHandler.mem,
     "debug.bt": DebugHandler.bt,
     "debug.events.poll": DebugHandler.events_poll,
+    "debug.context": DebugHandler.context,
 }
