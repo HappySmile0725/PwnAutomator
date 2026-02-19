@@ -19,6 +19,11 @@ if CLIENT_DIR not in sys.path:
 from ghidra_client import GhidraMCP  # type: ignore  # noqa: E402
 
 
+DEFAULT_PROTOCOL_VERSION = "2025-11-25"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 9999
+
+
 def _tool(
     name: str,
     description: str,
@@ -87,7 +92,7 @@ TOOLS: List[Dict[str, Any]] = [
     ),
     _tool(
         "mem_dec",
-        "Read bytes as decimal value from address.",
+        "Read integer value from address (returns hex + value_dec).",
         properties={
             "addr": {"type": "string"},
             "size": {"type": "integer", "minimum": 1, "default": 8},
@@ -176,6 +181,17 @@ TOOLS: List[Dict[str, Any]] = [
                 "default": False,
             }
         },
+        additional_properties=True,
+    ),
+    _tool(
+        "debug_run",
+        "Run program (uses loaded executable, or resolves binary if missing).",
+        properties={
+            "session_id": {"type": "string"},
+            "input": {"type": "string", "description": "Optional stdin input for the program"},
+            "binary": {"type": "string", "description": "Optional explicit binary path override"},
+        },
+        required=["session_id"],
         additional_properties=True,
     ),
     _tool(
@@ -282,7 +298,7 @@ TOOLS: List[Dict[str, Any]] = [
     ),
     _tool(
         "debug_regs",
-        "Read registers.",
+        "Read registers as hexadecimal values.",
         properties={"session_id": {"type": "string"}},
         required=["session_id"],
     ),
@@ -321,9 +337,37 @@ TOOLS: List[Dict[str, Any]] = [
         required=["session_id"],
     ),
     _tool(
+        "debug_cmd",
+        "Execute raw GDB command.",
+        properties={
+            "session_id": {"type": "string"},
+            "gdb_cmd": {"type": "string"},
+            "timeout_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 3000,
+                "description": "Shell-command timeout in milliseconds for `shell`/`!` commands.",
+            },
+        },
+        required=["session_id", "gdb_cmd"],
+    ),
+    _tool(
+        "debug_restart_server",
+        "Restart the GDB server process (kill and spawn new).",
+        properties={},
+        required=[],
+    ),
+    _tool(
         "debug_read_stdout",
         "Read stdout/stderr output from the inferior process.",
-        properties={},
+        properties={
+            "max_bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 65536,
+                "description": "Maximum bytes to read from current PTY output buffer.",
+            }
+        },
         required=[],
     ),
 ]
@@ -349,6 +393,7 @@ TOOL_TO_COMMAND = {
     "search_xrefs_from": "search.xrefs_from",
     "debug_open": "debug.open",
     "debug_open_current": "debug.open.current",
+    "debug_run": "debug.run",
     "debug_attach": "debug.attach",
     "debug_close": "debug.close",
     "debug_list": "debug.list",
@@ -366,6 +411,8 @@ TOOL_TO_COMMAND = {
     "debug_bt": "debug.bt",
     "debug_events_poll": "debug.events.poll",
     "debug_context": "debug.context",
+    "debug_cmd": "debug.cmd",
+    "debug_restart_server": "debug.restart_server",
     "debug_read_stdout": "debug.read_stdout",
 }
 
@@ -373,7 +420,7 @@ TOOL_TO_COMMAND = {
 def _json_dump(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False)
-    except Exception:
+    except (TypeError, ValueError):
         return repr(value)
 
 
@@ -381,6 +428,19 @@ def _as_structured_content(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {"result": value}
+
+
+def _parse_env_port(value: str | None, default: int) -> int:
+    text = str(value if value is not None else "").strip()
+    if text.isdigit():
+        return int(text)
+    return default
+
+
+def _normalize_tool_args(arguments: Any) -> Dict[str, Any]:
+    if isinstance(arguments, dict):
+        return arguments
+    return {}
 
 
 class MCPServer:
@@ -403,20 +463,32 @@ class MCPServer:
     def _read_message(self) -> Dict[str, Any] | None:
         # Primary mode: MCP stdio framing (Content-Length headers).
         # Fallback mode: single-line JSON messages.
-        first = sys.stdin.buffer.readline()
-        if first == b"":
-            return None
-
-        stripped = first.strip()
-        if stripped.startswith(b"{"):
-            try:
-                return json.loads(stripped.decode("utf-8"))
-            except Exception as exc:
-                self._log("failed to parse line-json request: %s" % str(exc))
+        while True:
+            first = sys.stdin.buffer.readline()
+            if first == b"":
                 return None
 
+            stripped = first.strip()
+            if stripped.startswith(b"{"):
+                parsed = self._parse_line_json(stripped)
+                if parsed is not None:
+                    return parsed
+                continue
+
+            parsed = self._parse_framed_json(first)
+            if parsed is not None:
+                return parsed
+
+    def _parse_line_json(self, stripped_line: bytes) -> Dict[str, Any] | None:
+        try:
+            return json.loads(stripped_line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            self._log("failed to parse line-json request: %s" % str(exc))
+            return None
+
+    def _parse_framed_json(self, first_header_line: bytes) -> Dict[str, Any] | None:
         headers: Dict[str, str] = {}
-        line = first
+        line = first_header_line
         while True:
             if line in (b"\r\n", b"\n"):
                 break
@@ -434,7 +506,7 @@ class MCPServer:
 
         try:
             length = int(length_raw)
-        except Exception:
+        except ValueError:
             self._log("invalid content-length: %r" % length_raw)
             return None
 
@@ -445,7 +517,7 @@ class MCPServer:
 
         try:
             return json.loads(body.decode("utf-8"))
-        except Exception as exc:
+        except (UnicodeDecodeError, ValueError) as exc:
             self._log("failed to parse framed request: %s" % str(exc))
             return None
 
@@ -480,7 +552,7 @@ class MCPServer:
             if method == "initialize":
                 requested_version = params.get("protocolVersion")
                 if not isinstance(requested_version, str) or not requested_version:
-                    requested_version = "2025-11-25"
+                    requested_version = DEFAULT_PROTOCOL_VERSION
                 result = {
                     "protocolVersion": requested_version,
                     "capabilities": {"tools": {}},
@@ -508,9 +580,7 @@ class MCPServer:
 
             if method == "tools/call":
                 name = params.get("name")
-                args = params.get("arguments") or {}
-                if not isinstance(args, dict):
-                    args = {}
+                args = _normalize_tool_args(params.get("arguments"))
                 result = self._call_tool(name, args)
                 if req_id is not None:
                     self._send_result(req_id, result)
@@ -530,24 +600,25 @@ class MCPServer:
 
     def _call_tool(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            if name == "ghidra_call":
+            tool_name = str(name or "").strip()
+            if not tool_name:
+                raise ValueError("name is required")
+            if tool_name == "ghidra_call":
                 cmd = args.get("cmd")
-                cmd_args = args.get("args") or {}
+                cmd_args = _normalize_tool_args(args.get("args"))
                 if not cmd:
                     raise ValueError("cmd is required")
-                if not isinstance(cmd_args, dict):
-                    raise ValueError("args must be an object")
                 data = self.client.call(str(cmd), **cmd_args)
-            elif name == "disassemble_function":
+            elif tool_name == "disassemble_function":
                 start_address = args.get("start_address")
                 if not start_address:
                     raise ValueError("start_address is required")
                 count = args.get("count", 64)
                 data = self.client.call("mem.asm", addr=start_address, count=count)
             else:
-                cmd = TOOL_TO_COMMAND.get(str(name))
+                cmd = TOOL_TO_COMMAND.get(tool_name)
                 if not cmd:
-                    raise ValueError("Unknown tool: %s" % name)
+                    raise ValueError("Unknown tool: %s" % tool_name)
                 data = self.client.call(cmd, **args)
 
             return {
@@ -566,8 +637,12 @@ class MCPServer:
 
 def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Claude MCP wrapper for ghidra_tools")
-    parser.add_argument("--host", default=os.environ.get("GHIDRA_HOST", "127.0.0.1"))
-    parser.add_argument("--port", default=int(os.environ.get("GHIDRA_PORT", "9999")), type=int)
+    parser.add_argument("--host", default=os.environ.get("GHIDRA_HOST", DEFAULT_HOST))
+    parser.add_argument(
+        "--port",
+        default=_parse_env_port(os.environ.get("GHIDRA_PORT"), DEFAULT_PORT),
+        type=int,
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 

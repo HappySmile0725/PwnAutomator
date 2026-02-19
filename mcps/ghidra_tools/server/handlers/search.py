@@ -1,8 +1,38 @@
 # -*- coding: utf-8 -*-
-import sys
-sys.path.insert(0, sys.path[0] + "/..")
-from utils import GhidraContext as ctx
 import jarray
+from utils import GhidraContext as ctx
+
+HEX_CHARS = set("0123456789abcdefABCDEF")
+
+
+def _to_non_negative_int(value, default):
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    return default
+
+
+def _parse_byte_token(token):
+    text = str(token).strip()
+    if text.startswith("0x") or text.startswith("0X"):
+        text = text[2:]
+    if len(text) == 0 or len(text) > 2:
+        return None
+    for ch in text:
+        if ch not in HEX_CHARS:
+            return None
+    return int(text, 16)
+
+
+def _to_signed_byte(value):
+    if value <= 0x7F:
+        return value
+    return value - 0x100
+
+
+def _addr_hex(addr):
+    return "0x%x" % int(addr.getOffset())
+
 
 class SearchHandler:
     """search cmds"""
@@ -10,14 +40,15 @@ class SearchHandler:
     @staticmethod
     def func_by_pattern(args):
         """search functions by name pattern"""
+        args = args or {}
         pattern = args.get("pattern", "").lower()
         result = []
         
-        for f in ctx.fm.getFunctions(True):
-            if pattern in f.getName().lower():
+        for func in ctx.fm.getFunctions(True):
+            if pattern in func.getName().lower():
                 result.append({
-                    "addr": str(f.getEntryPoint()),
-                    "name": f.getName()
+                    "addr": _addr_hex(func.getEntryPoint()),
+                    "name": func.getName()
                 })
         
         return result
@@ -25,12 +56,9 @@ class SearchHandler:
     @staticmethod
     def string(args):
         """string search"""
+        args = args or {}
         pattern = args.get("pattern", "").lower()
-        max_results = args.get("max", 50)
-        try:
-            max_results = int(max_results)
-        except:
-            max_results = 50
+        max_results = _to_non_negative_int(args.get("max", 50), 50)
 
         result = []
 
@@ -39,34 +67,25 @@ class SearchHandler:
         while it.hasNext():
             data = it.next()
 
-            is_string = False
-            try:
-                is_string = bool(data.hasStringValue())
-            except:
-                is_string = False
+            has_string_value = getattr(data, "hasStringValue", None)
+            is_string = bool(has_string_value()) if callable(has_string_value) else False
 
             if not is_string:
-                try:
-                    dt_name = str(data.getDataType().getDisplayName()).lower()
-                except:
-                    dt_name = str(data.getDataType()).lower()
+                dt = data.getDataType()
+                get_display_name = getattr(dt, "getDisplayName", None)
+                dt_name = str(get_display_name() if callable(get_display_name) else dt).lower()
                 if ("string" in dt_name) or ("unicode" in dt_name):
                     is_string = True
 
             if not is_string:
                 continue
 
-            try:
-                val = str(data.getValue())
-            except:
-                try:
-                    val = str(data.getDefaultValueRepresentation())
-                except:
-                    continue
+            value_obj = data.getValue()
+            val = str(value_obj) if value_obj is not None else str(data.getDefaultValueRepresentation())
 
             if pattern in val.lower():
                 result.append({
-                    "addr": str(data.getAddress()),
+                    "addr": _addr_hex(data.getAddress()),
                     "value": val
                 })
                 if len(result) >= max_results:
@@ -77,14 +96,26 @@ class SearchHandler:
     @staticmethod
     def bytes_pattern(args):
         """specific byte pattern search"""
-        # from ghidra.program.model.mem import MemoryBytePatternSearcher (removed: valid in some versions but ctx.mem.findBytes is safer)
-        
-        pattern = args.get("pattern")  # ex: "90 90 90"
-        max_results = args.get("max", 20)
-        
+        args = args or {}
+        pattern = str(args.get("pattern", "")).strip()  # ex: "90 90 90"
+        max_results = _to_non_negative_int(args.get("max", 20), 20)
+
+        if not pattern:
+            return {"error": "pattern required"}
+
+        tokens = pattern.split()
+        if not tokens:
+            return {"error": "pattern required"}
+
         # parse pattern
-        bytes_list = [int(b, 16) for b in pattern.split()]
-        search_bytes = jarray.array([b & 0xff for b in bytes_list], 'b')
+        bytes_list = []
+        for token in tokens:
+            parsed = _parse_byte_token(token)
+            if parsed is None:
+                return {"error": "invalid pattern token: %s" % token}
+            bytes_list.append(parsed)
+
+        search_bytes = jarray.array([_to_signed_byte(b) for b in bytes_list], 'b')
         
         result = []
         mem = ctx.mem
@@ -98,7 +129,7 @@ class SearchHandler:
             
             addr = mem.findBytes(start, end, search_bytes, None, True, None)
             while addr and len(result) < max_results:
-                result.append(str(addr))
+                result.append(_addr_hex(addr))
                 addr = mem.findBytes(addr.add(1), end, search_bytes, None, True, None)
         
         return result
@@ -106,8 +137,7 @@ class SearchHandler:
     @staticmethod
     def xrefs_to(args):
         """specific address to references search"""
-        from ghidra.program.model.symbol import ReferenceManager
-        
+        args = args or {}
         addr = ctx.addr(args.get("addr"))
         result = []
         
@@ -116,7 +146,7 @@ class SearchHandler:
             from_addr = ref.getFromAddress()
             func = ctx.fm.getFunctionContaining(from_addr)
             result.append({
-                "from": str(from_addr),
+                "from": _addr_hex(from_addr),
                 "func": func.getName() if func else None,
                 "type": str(ref.getReferenceType())
             })
@@ -126,6 +156,7 @@ class SearchHandler:
     @staticmethod
     def xrefs_from(args):
         """specific address from references search"""
+        args = args or {}
         addr = ctx.addr(args.get("addr"))
         result = []
         
@@ -134,7 +165,7 @@ class SearchHandler:
             to_addr = ref.getToAddress()
             func = ctx.fm.getFunctionContaining(to_addr)
             result.append({
-                "to": str(to_addr),
+                "to": _addr_hex(to_addr),
                 "func": func.getName() if func else None,
                 "type": str(ref.getReferenceType())
             })

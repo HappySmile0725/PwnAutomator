@@ -17,26 +17,32 @@ class GhidraMCP:
         self.host = _normalize_connect_host(host)
         self.port = port
 
+    @staticmethod
+    def _recv_one_json(sock):
+        chunks = []
+        while True:
+            data = sock.recv(65536)
+            if not data:
+                break
+            chunks.append(data)
+            if b"\n" in data:
+                break
+        if not chunks:
+            raise Exception("empty response (server closed connection)")
+        raw = b"".join(chunks).decode("utf-8").strip()
+        if not raw:
+            raise Exception("empty response payload")
+        return json.loads(raw)
+
     def call(self, cmd, **args):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((self.host, self.port))
-        try:
-            sock.sendall(json.dumps({"cmd": cmd, "args": args}).encode("utf-8"))
-            chunks = []
-            while True:
-                data = sock.recv(65536)
-                if not data:
-                    break
-                chunks.append(data)
-                if b"\n" in data:
-                    break
-            raw = b"".join(chunks).decode("utf-8").strip()
-            res = json.loads(raw)
-            if res.get("ok"):
-                return res.get("result")
-            raise Exception(res.get("error"))
-        finally:
-            sock.close()
+        with socket.create_connection((self.host, self.port)) as sock:
+            payload = json.dumps({"cmd": cmd, "args": args}).encode("utf-8") + b"\n"
+            sock.sendall(payload)
+            res = self._recv_one_json(sock)
+
+        if res.get("ok"):
+            return res.get("result")
+        raise Exception(res.get("error"))
 
     # static analysis methods
     def meta(self, binary_path=None):
@@ -207,6 +213,18 @@ class GhidraMCP:
 
     def debug_events(self, session_id, max=20):
         return self.call("debug.events.poll", session_id=session_id, max=max)
+
+    def debug_context(self, session_id):
+        return self.call("debug.context", session_id=session_id)
+
+    def debug_read_stdout(self, max_bytes=65536):
+        return self.call("debug.read_stdout", max_bytes=max_bytes)
+
+    def debug_cmd(self, session_id, gdb_cmd, timeout_ms=3000):
+        return self.call("debug.cmd", session_id=session_id, gdb_cmd=gdb_cmd, timeout_ms=timeout_ms)
+
+    def debug_restart_server(self):
+        return self.call("debug.restart_server")
 
 
 if __name__ == "__main__":

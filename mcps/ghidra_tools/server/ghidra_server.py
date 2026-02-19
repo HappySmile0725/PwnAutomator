@@ -7,20 +7,14 @@ import socket
 import json
 import sys
 import os
-import subprocess
 
-# modules
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "handlers"))
 
-# context
 from utils import GhidraContext
 GhidraContext.init(currentProgram)
 
-# load handlers
-# Import directly from handler modules to avoid stale Jython package-cache issues
-# (e.g., old handlers/__init__$py.class missing newly added exports).
 from functions import FunctionsHandler
 from memory import MemoryHandler
 from decompile import DecompileHandler
@@ -28,14 +22,13 @@ from search import SearchHandler
 from meta import MetaHandler
 from debug import DebugHandler
 
-# commands setup
+
 class ServerCommands:
     def __init__(self):
         self.cmds = {}
         self.register_all()
         
     def register_all(self):
-        # Register handlers
         self.cmds.update({
             # Functions
             "func.list": FunctionsHandler.list_all,
@@ -65,6 +58,7 @@ class ServerCommands:
             # Dynamic Debug
             "debug.open": DebugHandler.open,
             "debug.open.current": DebugHandler.open_current,
+            "debug.run": DebugHandler.run,
             "debug.attach": DebugHandler.attach,
             "debug.close": DebugHandler.close,
             "debug.list": DebugHandler.list_sessions,
@@ -80,7 +74,11 @@ class ServerCommands:
             "debug.regs": DebugHandler.regs,
             "debug.mem": DebugHandler.mem,
             "debug.bt": DebugHandler.bt,
+            "debug.context": DebugHandler.context,
+            "debug.read_stdout": DebugHandler.read_stdout,
             "debug.events.poll": DebugHandler.events_poll,
+            "debug.cmd": DebugHandler.cmd,
+            "debug.restart_server": DebugHandler.restart_server,
 
             "help": self.get_help
         })
@@ -94,7 +92,7 @@ class ServerCommands:
             "func.name": "search function by name {name}",
             "func.addr": "get function info by address {addr}",
             "mem.hex": "read hex bytes {addr, size}",
-            "mem.dec": "read decimal value {addr, size}",
+            "mem.dec": "read integer value {addr, size} (returns hex + value_dec)",
             "mem.str": "read string {addr, maxlen}",
             "mem.asm": "read assembly {addr, count}",
             "decompile.addr": "decompile by address {addr}",
@@ -107,6 +105,7 @@ class ServerCommands:
             "meta": "get binary metadata (includes checksec, optional: {binary_path})",
             "debug.open": "launch binary under gdb/mi {binary?, argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
             "debug.open.current": "launch current program with gdb/mi {argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
+            "debug.run": "run binary {session_id, input?, binary?}",
             "debug.attach": "attach pid with gdb/mi {pid, gdb_path?, gdb_args?}",
             "debug.close": "close debug session {session_id}",
             "debug.list": "list debug sessions",
@@ -119,24 +118,55 @@ class ServerCommands:
             "debug.nexti": "next instruction {session_id}",
             "debug.interrupt": "interrupt execution {session_id}",
             "debug.stdin.write": "write input to inferior stdin {session_id, data, append_newline?, wait_ms?, max_events?}",
-            "debug.regs": "list register values {session_id}",
+            "debug.regs": "list register values in hex {session_id}",
             "debug.mem": "read memory bytes {session_id, addr, size}",
             "debug.bt": "stack backtrace {session_id, depth?}",
+            "debug.context": "context snapshot (registers/code/stack) {session_id}",
+            "debug.read_stdout": "read buffered stdout/stderr {max_bytes?}",
             "debug.events.poll": "poll async debug events {session_id, max?}",
+            "debug.cmd": "execute raw gdb command {session_id, cmd, timeout_ms?}",
+            "debug.restart_server": "restart gdb server process",
             "help": "show help message"
         }
     
     def execute(self, cmd, args):
-        if cmd in self.cmds:
-            return True, self.cmds[cmd](args)
+        handler = self.cmds.get(cmd)
+        if handler is not None:
+            return True, handler(args)
         return False, "Unknown command: %s" % cmd
 
-# server
-HOST = os.environ.get("GHIDRA_MCP_BIND_HOST", os.environ.get("GHIDRA_HOST", "0.0.0.0"))
-try:
-    PORT = int(os.environ.get("GHIDRA_MCP_BIND_PORT", os.environ.get("GHIDRA_PORT", "9999")))
-except:
-    PORT = 9999
+
+HOST = "0.0.0.0"
+PORT = 9999
+
+
+def _send_response(conn, payload):
+    conn.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+
+
+def _recv_request(conn):
+    chunks = []
+    while True:
+        data = conn.recv(65536)
+        if not data:
+            break
+        chunks.append(data)
+        if b"\n" in data:
+            break
+    return b"".join(chunks).decode("utf-8")
+
+
+def _handle_request(server_cmds, req):
+    cmd = req.get("cmd")
+    args = req.get("args", {})
+
+    ok, result = server_cmds.execute(cmd, args)
+    if ok:
+        if isinstance(result, dict) and set(result.keys()) == set(["error"]):
+            return {"ok": False, "error": result["error"]}
+        return {"ok": True, "result": result}
+    return {"ok": False, "error": result}
+
 
 def run_server():
     server_cmds = ServerCommands()
@@ -154,24 +184,24 @@ def run_server():
     
     while True:
         conn, addr = sock.accept()
+        response = None
         try:
-            data = conn.recv(65536)
-            if not data: continue
-            
-            req = json.loads(data.decode('utf-8'))
-            cmd = req.get("cmd")
-            args = req.get("args", {})
-            
-            ok, result = server_cmds.execute(cmd, args)
-            response = {"ok": ok}
-            if ok: response["result"] = result
-            else: response["error"] = result
-            
-            conn.sendall(json.dumps(response).encode('utf-8') + b"\n")
-            
-        except Exception as e:
-            conn.sendall(json.dumps({"ok": False, "error": str(e)}).encode('utf-8') + b"\n")
+            raw = _recv_request(conn).strip()
+            if not raw:
+                conn.close()
+                continue
+            req = json.loads(raw)
+            response = _handle_request(server_cmds, req)
+        except ValueError as e:
+            response = {"ok": False, "error": "Invalid JSON: %s" % str(e)}
+        except BaseException as e:
+            response = {"ok": False, "error": str(e)}
         finally:
+            if response is not None:
+                try:
+                    _send_response(conn, response)
+                except socket.error:
+                    pass
             conn.close()
 
 run_server()
