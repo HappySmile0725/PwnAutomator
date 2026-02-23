@@ -1,8 +1,8 @@
 # PwnAutomator
-PwnAutomator
 ---
 
 ## Summary
+
 CTF Pwnable Auto Solver
 ---
 
@@ -11,10 +11,10 @@ CTF Pwnable Auto Solver
  
 2. ```pip install fastmcp pwntools```
 
-3. download ghidra in `mcps` directory (FYI : https://dokhakdubini.tistory.com/564)
+3. Download ghidra in `mcps` directory (FYI : https://dokhakdubini.tistory.com/564)
     - `https://github.com/NationalSecurityAgency/ghidra/releases`
 
-4. add this in mcp config file
+4. Add this in mcp config file
 ```json
     "ghidra-mcp": {
       "command": "[python Directory]",
@@ -32,12 +32,12 @@ CTF Pwnable Auto Solver
 ```
 - These files have to run in Ubuntu, so HOST IP will be your wsl or ubuntu ip.
 
-5. fast run
+5. Fast run
 ```bash
 ./run_ghidra_server.sh
 ```
 
-6. individual exec
+6. Individual exec
 If you have to run these files individually for some reason, use these.
 - Static Debugging : use 9999 port
 ```bash
