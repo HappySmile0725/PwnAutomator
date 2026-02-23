@@ -16,12 +16,20 @@ CLIENT_DIR = os.path.join(THIS_DIR, "client")
 if CLIENT_DIR not in sys.path:
     sys.path.insert(0, CLIENT_DIR)
 
+PWNTOOLS_CLIENT_DIR = os.path.abspath(os.path.join(THIS_DIR, "..", "pwntools_tools", "client"))
+if PWNTOOLS_CLIENT_DIR not in sys.path:
+    sys.path.insert(0, PWNTOOLS_CLIENT_DIR)
+
 from ghidra_client import GhidraMCP  # type: ignore  # noqa: E402
+from pwntools_client import PwntoolsMCP  # type: ignore  # noqa: E402
 
 
 DEFAULT_PROTOCOL_VERSION = "2025-11-25"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9999
+DEFAULT_PWN_HOST = "127.0.0.1"
+DEFAULT_PWN_PORT = 19191
+DEFAULT_PWN_TIMEOUT = 10.0
 
 
 def _tool(
@@ -370,6 +378,69 @@ TOOLS: List[Dict[str, Any]] = [
         },
         required=[],
     ),
+    _tool(
+        "pwn_payload_write",
+        "Create payload script with mandatory pwntools template.",
+        properties={
+            "payload_content": {"type": "string"},
+            "filename": {"type": "string"},
+        },
+        required=["payload_content", "filename"],
+    ),
+    _tool(
+        "pwn_payload_read",
+        "Read payload script and parsed payload body.",
+        properties={"path": {"type": "string"}},
+        required=["path"],
+    ),
+    _tool("pwn_payload_list", "List saved payload scripts."),
+    _tool(
+        "pwn_payload_execute",
+        "Execute payload against fixed target mcps/test/chall.",
+        properties={
+            "path": {"type": "string"},
+            "pause_before_payload": {"type": "boolean", "default": False},
+            "wait_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 300,
+                "description": "Wait for initial stdout/stderr collection before returning.",
+            },
+        },
+        required=["path"],
+    ),
+    _tool(
+        "pwn_session_poll",
+        "Poll stdout/stderr/status from a running payload session.",
+        properties={"session_id": {"type": "string"}},
+        required=["session_id"],
+    ),
+    _tool(
+        "pwn_session_send",
+        "Send stdin data to a payload session.",
+        properties={
+            "session_id": {"type": "string"},
+            "data": {"type": "string"},
+            "append_newline": {"type": "boolean", "default": False},
+        },
+        required=["session_id", "data"],
+    ),
+    _tool(
+        "pwn_session_continue",
+        "Resume pause() state by sending newline to session stdin.",
+        properties={"session_id": {"type": "string"}},
+        required=["session_id"],
+    ),
+    _tool(
+        "pwn_session_stop",
+        "Stop and remove payload session.",
+        properties={
+            "session_id": {"type": "string"},
+            "kill": {"type": "boolean", "default": False},
+        },
+        required=["session_id"],
+    ),
+    _tool("pwn_session_list", "List active payload sessions."),
 ]
 
 
@@ -417,6 +488,19 @@ TOOL_TO_COMMAND = {
 }
 
 
+PWN_TOOL_TO_COMMAND = {
+    "pwn_payload_write": "pwn.payload.write",
+    "pwn_payload_read": "pwn.payload.read",
+    "pwn_payload_list": "pwn.payload.list",
+    "pwn_payload_execute": "pwn.payload.execute",
+    "pwn_session_poll": "pwn.session.poll",
+    "pwn_session_send": "pwn.session.send",
+    "pwn_session_continue": "pwn.session.continue",
+    "pwn_session_stop": "pwn.session.stop",
+    "pwn_session_list": "pwn.session.list",
+}
+
+
 def _json_dump(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False)
@@ -437,6 +521,16 @@ def _parse_env_port(value: str | None, default: int) -> int:
     return default
 
 
+def _parse_env_float(value: str | None, default: float) -> float:
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return default
+    try:
+        return float(text)
+    except ValueError:
+        return default
+
+
 def _normalize_tool_args(arguments: Any) -> Dict[str, Any]:
     if isinstance(arguments, dict):
         return arguments
@@ -444,9 +538,18 @@ def _normalize_tool_args(arguments: Any) -> Dict[str, Any]:
 
 
 class MCPServer:
-    def __init__(self, host: str, port: int, verbose: bool = False) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        pwn_host: str,
+        pwn_port: int,
+        pwn_timeout: float = DEFAULT_PWN_TIMEOUT,
+        verbose: bool = False,
+    ) -> None:
         self.verbose = bool(verbose)
         self.client = GhidraMCP(host=host, port=port)
+        self.pwn_client = PwntoolsMCP(host=pwn_host, port=pwn_port, timeout=pwn_timeout)
 
     def run(self) -> int:
         while True:
@@ -598,12 +701,20 @@ class MCPServer:
                 {"traceback": traceback.format_exc()},
             )
 
+    def _call_pwn_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        cmd = PWN_TOOL_TO_COMMAND.get(tool_name)
+        if not cmd:
+            raise ValueError("Unknown pwntools tool: %s" % tool_name)
+        return self.pwn_client.call(cmd, **args)
+
     def _call_tool(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         try:
             tool_name = str(name or "").strip()
             if not tool_name:
                 raise ValueError("name is required")
-            if tool_name == "ghidra_call":
+            if tool_name.startswith("pwn_"):
+                data = self._call_pwn_tool(tool_name, args)
+            elif tool_name == "ghidra_call":
                 cmd = args.get("cmd")
                 cmd_args = _normalize_tool_args(args.get("args"))
                 if not cmd:
@@ -621,10 +732,11 @@ class MCPServer:
                     raise ValueError("Unknown tool: %s" % tool_name)
                 data = self.client.call(cmd, **args)
 
+            is_error = isinstance(data, dict) and str(data.get("status", "")).lower() == "error"
             return {
                 "content": [{"type": "text", "text": _json_dump(data)}],
                 "structuredContent": _as_structured_content(data),
-                "isError": False,
+                "isError": is_error,
             }
         except Exception as exc:
             err = str(exc)
@@ -643,13 +755,40 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         default=_parse_env_port(os.environ.get("GHIDRA_PORT"), DEFAULT_PORT),
         type=int,
     )
+    parser.add_argument(
+        "--pwn-host",
+        default=os.environ.get("GHIDRA_MCP_PWN_HOST", DEFAULT_PWN_HOST),
+    )
+    parser.add_argument(
+        "--pwn-port",
+        default=_parse_env_port(
+            os.environ.get("GHIDRA_MCP_PWN_PORT"),
+            DEFAULT_PWN_PORT,
+        ),
+        type=int,
+    )
+    parser.add_argument(
+        "--pwn-timeout",
+        default=_parse_env_float(
+            os.environ.get("GHIDRA_MCP_PWN_TIMEOUT"),
+            DEFAULT_PWN_TIMEOUT,
+        ),
+        type=float,
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: List[str] | None = None) -> int:
     args = parse_args(argv)
-    server = MCPServer(host=args.host, port=args.port, verbose=args.verbose)
+    server = MCPServer(
+        host=args.host,
+        port=args.port,
+        pwn_host=args.pwn_host,
+        pwn_port=args.pwn_port,
+        pwn_timeout=args.pwn_timeout,
+        verbose=args.verbose,
+    )
     return server.run()
 
 
