@@ -2,8 +2,7 @@
 ---
 
 ## Summary
-
-CTF Pwnable Auto Solver
+- CTF Pwnable Auto Solver
 ---
 
 ## How to run
