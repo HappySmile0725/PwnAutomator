@@ -8,7 +8,7 @@
 ## How to run
 1. You must have `gdb-peda`
  
-2. ```pip install fastmcp pwntools```
+2. `pip install fastmcp pwntools`
 
 3. Download ghidra in `mcps` directory (FYI : https://dokhakdubini.tistory.com/564)
     - `https://github.com/NationalSecurityAgency/ghidra/releases`
@@ -31,12 +31,14 @@
 ```
 - These files have to run in Ubuntu, so HOST IP will be your wsl or ubuntu ip.
 
-5. Fast run
+5. Move Target Binary to `mcps/test` & `mcps/pwntools_tools/server/challenge`
+
+6. Fast run
 ```bash
 ./run_ghidra_server.sh
 ```
 
-6. Individual exec
+7. Individual exec
 If you have to run these files individually for some reason, use these.
 - Static Debugging : use 9999 port
 ```bash
@@ -51,5 +53,5 @@ If you have to run these files individually for some reason, use these.
 python3 debug_bridge/server.py --host 0.0.0.0 --port 19090
 ```
 
-7. Close Server
+8. Close Server
 - Just `Ctrl + C`. run_ghidra_server.sh will clear backup files and cache folders.
