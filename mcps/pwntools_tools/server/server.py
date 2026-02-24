@@ -73,7 +73,7 @@ def _recv_request(conn: socket.socket, max_request_bytes: int) -> str:
 def _help_payload() -> Dict[str, Any]:
     return {
         "help": "show available pwntools commands",
-        "pwn.payload.write": "write payload script with enforced template {payload_content, filename}",
+        "pwn.payload.write": "write payload script with enforced template to fixed hack.py {payload_content}",
         "pwn.payload.read": "read payload script {path}",
         "pwn.payload.list": "list payload scripts",
         "pwn.payload.execute": "execute payload on fixed target mcps/test/chall {path, pause_before_payload?, wait_ms?}",

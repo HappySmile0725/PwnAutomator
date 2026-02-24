@@ -8,6 +8,7 @@ PROJECT_NAME="test"
 SCRIPT_PATH="./ghidra_tools/server"
 POST_SCRIPT="ghidra_server.py"
 DEBUG_SERVER="./ghidra_tools/gdb_server/server.py"
+PWN_SERVER="./pwntools_tools/server/server.py"
 BINARY_PATH="${1:-./test/chall}"
 PROGRAM_NAME="$(basename "$BINARY_PATH")"
 BINARY_ABS="$BINARY_PATH"
@@ -16,10 +17,12 @@ if [[ -e "$BINARY_PATH" ]]; then
 fi
 HPORT=9999
 DPORT=19090
+PPORT=19191
 DBG_PID=/tmp/ghidra_debug_bridge.pid
 DBG_STDIN_PID=/tmp/ghidra_debug_bridge_stdin.pid
 DBG_STDIN_FIFO=/tmp/ghidra_debug_bridge_stdin.fifo
 HEADLESS_PID=/tmp/ghidra_headless.pid
+PWN_PID=/tmp/pwntools_mcp.pid
 
 require_cmd() {
   local cmd="$1"
@@ -76,9 +79,16 @@ start_debug_bridge() {
   echo $! > "$DBG_PID"
 }
 
+start_pwntools_mcp() {
+  python3 "$PWN_SERVER" --host 0.0.0.0 --port "$PPORT" > /dev/null 2>&1 &
+  echo $! > "$PWN_PID"
+}
+
 validate_runtime() {
   require_cmd gdb
+  require_cmd python3
   [[ -x "$ANALYZE" ]] || { echo "[error] analyzeHeadless not found: $ANALYZE" >&2; exit 1; }
+  [[ -f "$PWN_SERVER" ]] || { echo "[error] pwntools server not found: $PWN_SERVER" >&2; exit 1; }
   local gdb_probe
   gdb_probe="$(gdb --batch --quiet -nx -nh -ex "python import sys" 2>&1 || true)"
   if grep -qi "python scripting is not supported" <<<"$gdb_probe"; then
@@ -89,17 +99,19 @@ validate_runtime() {
 
 cleanup_artifacts() {
   echo "[cleanup] removing __pycache__ and .class artifacts..."
-  find "./ghidra_tools" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+  find "./ghidra_tools" "./pwntools_tools" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
   find "./ghidra_tools" -type f -name "*.class" -delete 2>/dev/null || true
 }
 
 cleanup() {
   echo "[cleanup] stopping servers..."
   trap - EXIT # prevent loop
+  stop_pid "$PWN_PID"
   stop_pid "$DBG_PID"
   stop_pid "$DBG_STDIN_PID"
   stop_pid "$HEADLESS_PID"
   rm -f "$DBG_STDIN_FIFO"
+  kill_port "$PPORT"
   kill_port "$DPORT"
   kill_port "$HPORT"
   cleanup_artifacts
@@ -115,11 +127,13 @@ has_program() {
 
 kill_port "$DPORT"
 kill_port "$HPORT"
+kill_port "$PPORT"
 validate_runtime
 
 # Launch GDB In-Process Server (headless)
 # It binds to 0.0.0.0:19090 by default
 start_debug_bridge
+start_pwntools_mcp
 
 MODE=(-process "$PROGRAM_NAME")
 if ! has_program; then
@@ -162,10 +176,14 @@ echo "[info] Waiting for GDB Server (port $DPORT)..."
 wait_ready "debug_bridge" "$DPORT" "$(cat "$DBG_PID")"
 echo "[ok] GDB Server ready."
 
+echo "[info] Waiting for Pwntools MCP (port $PPORT)..."
+wait_ready "pwntools_mcp" "$PPORT" "$(cat "$PWN_PID")"
+echo "[ok] Pwntools MCP ready."
+
 echo "[info] Waiting for Ghidra Headless (port $HPORT)..."
 wait_ready "headless" "$HPORT" "$(cat "$HEADLESS_PID")"
 echo "[ok] Ghidra Headless ready."
-echo "[ok] debug_bridge pid=$(cat "$DBG_PID"), headless pid=$(cat "$HEADLESS_PID")"
+echo "[ok] debug_bridge pid=$(cat "$DBG_PID"), pwntools pid=$(cat "$PWN_PID"), headless pid=$(cat "$HEADLESS_PID")"
 echo "[info] Services running. Press Ctrl+C to stop."
 
 wait

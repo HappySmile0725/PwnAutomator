@@ -50,3 +50,6 @@ If you have to run these files individually for some reason, use these.
 ```bash
 python3 debug_bridge/server.py --host 0.0.0.0 --port 19090
 ```
+
+7. Close Server
+- Just `Ctrl + C`. run_ghidra_server.sh will clear backup files and cache folders.

@@ -14,7 +14,11 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
-TEMPLATE_TAG = "MCP_PWNTOOLS_TEMPLATE_V1"
+FIXED_PAYLOAD_FILENAME = "hack.py"
+TEMPLATE_IMPORT_LINE = "from pwn import *"
+TEMPLATE_PROCESS_LINE = "p = process('./chall')"
+TEMPLATE_ELF_LINE = "e = ELF('./chall', checksec=False)"
+TEMPLATE_INTERACTIVE_LINE = "p.interactive()"
 PID_LINE_REGEX = re.compile(r"\[MCP\]\[PID\]\s*([0-9]+)")
 MAX_BUFFER_BYTES = 1_000_000
 
@@ -51,19 +55,6 @@ def _normalize_payload_body(payload_content: str) -> str:
     return content.rstrip()
 
 
-def _sanitize_filename(filename: str) -> str:
-    raw = str(filename or "").strip()
-    if not raw:
-        raise ValueError("filename is required")
-    if "/" in raw or "\\" in raw:
-        raise ValueError("filename must not include a directory path")
-    if raw in (".", ".."):
-        raise ValueError("invalid filename")
-    if not raw.endswith(".py"):
-        raw += ".py"
-    return raw
-
-
 def _is_plain_filename(text: str) -> bool:
     return "/" not in text and "\\" not in text and not os.path.isabs(text)
 
@@ -79,31 +70,33 @@ def _resolve_payload_path(path_or_name: str) -> str:
 
 def render_payload_template(payload_content: str) -> str:
     body = _normalize_payload_body(payload_content)
-    return (
-        "# %s\n" % TEMPLATE_TAG
-        + "from pwn import *\n"
-        + "p = process('./chall')\n"
-        + "e = ELF('./chall', checksec=False)\n\n"
-        + "%s\n\n" % body
-        + "p.interactive()\n"
-    )
+    lines = [
+        TEMPLATE_IMPORT_LINE,
+        TEMPLATE_PROCESS_LINE,
+        TEMPLATE_ELF_LINE,
+        "",
+        body,
+        "",
+        TEMPLATE_INTERACTIVE_LINE,
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def is_template_payload(text: str) -> bool:
     data = str(text or "")
-    return (
-        TEMPLATE_TAG in data
-        and "from pwn import *" in data
-        and "p = process('./chall')" in data
-        and "e = ELF('./chall', checksec=False)" in data
-        and "p.interactive()" in data
+    required = (
+        TEMPLATE_IMPORT_LINE,
+        TEMPLATE_PROCESS_LINE,
+        TEMPLATE_ELF_LINE,
+        TEMPLATE_INTERACTIVE_LINE,
     )
+    return all(token in data for token in required)
 
 
 def extract_payload_body(text: str) -> str:
     data = str(text or "")
-    prefix = "e = ELF('./chall', checksec=False)"
-    suffix = "p.interactive()"
+    prefix = TEMPLATE_ELF_LINE
+    suffix = TEMPLATE_INTERACTIVE_LINE
     start = data.find(prefix)
     end = data.rfind(suffix)
     if start < 0 or end < 0 or end <= start:
@@ -131,18 +124,16 @@ class PwntoolsRuntime:
         self._sessions: Dict[str, PayloadSession] = {}
         self._sessions_lock = threading.Lock()
 
-    def write_payload(self, payload_content: str, filename: str) -> Dict[str, Any]:
+    def write_payload(self, payload_content: str) -> Dict[str, Any]:
         try:
             os.makedirs(DEFAULT_PAYLOAD_DIR, exist_ok=True)
-            safe_name = _sanitize_filename(filename)
-            output_path = os.path.abspath(os.path.join(DEFAULT_PAYLOAD_DIR, safe_name))
+            output_path = os.path.abspath(os.path.join(DEFAULT_PAYLOAD_DIR, FIXED_PAYLOAD_FILENAME))
             script = render_payload_template(payload_content)
             with open(output_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(script)
             return _ok(
                 path=output_path,
-                filename=safe_name,
-                template=TEMPLATE_TAG,
+                filename=FIXED_PAYLOAD_FILENAME,
                 target_binary_default=os.path.abspath(DEFAULT_BINARY_PATH),
             )
         except Exception as exc:
@@ -200,7 +191,12 @@ class PwntoolsRuntime:
                 return _error(
                     "payload format mismatch: use pwn_payload_write template",
                     path=payload_path,
-                    expected_template=TEMPLATE_TAG,
+                    expected_lines=[
+                        TEMPLATE_IMPORT_LINE,
+                        TEMPLATE_PROCESS_LINE,
+                        TEMPLATE_ELF_LINE,
+                        TEMPLATE_INTERACTIVE_LINE,
+                    ],
                 )
 
             target_binary = os.path.abspath(DEFAULT_BINARY_PATH)
@@ -405,8 +401,8 @@ class PwntoolsRuntime:
 RUNTIME = PwntoolsRuntime()
 
 
-def write_payload(payload_content: str, filename: str) -> Dict[str, Any]:
-    return RUNTIME.write_payload(payload_content=payload_content, filename=filename)
+def write_payload(payload_content: str) -> Dict[str, Any]:
+    return RUNTIME.write_payload(payload_content=payload_content)
 
 
 def read_payload(path: str) -> Dict[str, Any]:

@@ -11,8 +11,7 @@ from .common import parse_bool, require_arg, require_text_arg
 
 def handle_payload_write(args: Dict[str, Any]) -> Dict[str, Any]:
     payload_content = require_arg(args, "payload_content")
-    filename = require_text_arg(args, "filename")
-    return runtime.write_payload(payload_content=str(payload_content), filename=filename)
+    return runtime.write_payload(payload_content=str(payload_content))
 
 
 def handle_payload_read(args: Dict[str, Any]) -> Dict[str, Any]:

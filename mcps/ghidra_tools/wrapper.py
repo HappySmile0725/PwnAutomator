@@ -199,7 +199,7 @@ TOOLS: List[Dict[str, Any]] = [
             "input": {"type": "string", "description": "Optional stdin input for the program"},
             "binary": {"type": "string", "description": "Optional explicit binary path override"},
         },
-        required=["session_id"],
+        required=[],
         additional_properties=True,
     ),
     _tool(
@@ -380,12 +380,11 @@ TOOLS: List[Dict[str, Any]] = [
     ),
     _tool(
         "pwn_payload_write",
-        "Create payload script with mandatory pwntools template.",
+        "Create payload script with mandatory pwntools template (always writes hack.py).",
         properties={
             "payload_content": {"type": "string"},
-            "filename": {"type": "string"},
         },
-        required=["payload_content", "filename"],
+        required=["payload_content"],
     ),
     _tool(
         "pwn_payload_read",
@@ -512,6 +511,19 @@ def _as_structured_content(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {"result": value}
+
+
+def _detect_result_error(data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    status = str(data.get("status", "")).lower()
+    if status == "error":
+        return True
+    if data.get("ok") is False:
+        return True
+    if "error" in data and data.get("error") not in (None, ""):
+        return True
+    return False
 
 
 def _parse_env_port(value: str | None, default: int) -> int:
@@ -732,7 +744,7 @@ class MCPServer:
                     raise ValueError("Unknown tool: %s" % tool_name)
                 data = self.client.call(cmd, **args)
 
-            is_error = isinstance(data, dict) and str(data.get("status", "")).lower() == "error"
+            is_error = _detect_result_error(data)
             return {
                 "content": [{"type": "text", "text": _json_dump(data)}],
                 "structuredContent": _as_structured_content(data),
