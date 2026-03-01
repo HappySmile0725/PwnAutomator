@@ -19,7 +19,14 @@
       "command": "[python Directory]",
       "args": [
         "[wrapper.py Directory]"
-      ]
+      ],
+      "env": {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "GHIDRA_HOST": "[HOST IP]",
+        "GHIDRA_PORT": "9999",
+        "GHIDRA_MCP_DEBUG_HOST": "[HOST IP]",
+        "GHIDRA_MCP_DEBUG_PORT": "19090"
+      }
     }
 ```
 - These files have to run in Ubuntu, so HOST IP will be your wsl or ubuntu ip.
