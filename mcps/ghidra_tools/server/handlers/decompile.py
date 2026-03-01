@@ -7,7 +7,8 @@ def _addr_hex(addr):
 
 
 def _decompile_func(func):
-    result = ctx.decomp.decompileFunction(func, 30, None)
+    decomp = ctx.ensure_decomp()
+    result = decomp.decompileFunction(func, 30, None)
     if not (result and result.decompileCompleted()):
         return None
     return {

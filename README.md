@@ -10,7 +10,7 @@
  
 2. `pip install fastmcp pwntools`
 
-3. Download ghidra in `mcps` directory (FYI : https://dokhakdubini.tistory.com/564)
+3. Download ghidra and unzip folder in `mcps` directory (FYI : https://dokhakdubini.tistory.com/564)
     - `https://github.com/NationalSecurityAgency/ghidra/releases`
 
 4. Add this in mcp config file
@@ -30,6 +30,7 @@
 ```bash
 ./run_ghidra_server.sh
 ```
+  - if some files exists in `mcps/challenge`, delete them all
 
 7. Individual exec
 If you have to run these files individually for some reason, use these.

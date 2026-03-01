@@ -34,13 +34,19 @@ class GhidraContext(object):
         GhidraContext.mem = program.getMemory()
         GhidraContext.listing = program.getListing()
         GhidraContext.addr_factory = program.getAddressFactory()
-        
-        # Decompiler setup
-        GhidraContext.decomp = DecompInterface()
-        GhidraContext.decomp.openProgram(program)
+        # Decompiler setup is lazy. openProgram() may block during startup.
+        GhidraContext.decomp = None
         
         # Debug Bridge setup
         GhidraContext.bridge_client = DebugBridgeClient()
+
+    @staticmethod
+    def ensure_decomp():
+        if GhidraContext.decomp is None:
+            decomp = DecompInterface()
+            decomp.openProgram(GhidraContext.program)
+            GhidraContext.decomp = decomp
+        return GhidraContext.decomp
 
     @staticmethod
     def bridge_call(cmd, args):

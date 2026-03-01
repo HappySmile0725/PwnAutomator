@@ -18,6 +18,7 @@ fi
 HPORT=9999
 DPORT=19090
 PPORT=19191
+HEADLESS_READY_TIMEOUT="${GHIDRA_MCP_HEADLESS_READY_TIMEOUT:-300}"
 DBG_PID=/tmp/ghidra_debug_bridge.pid
 DBG_STDIN_PID=/tmp/ghidra_debug_bridge_stdin.pid
 DBG_STDIN_FIFO=/tmp/ghidra_debug_bridge_stdin.fifo
@@ -35,6 +36,17 @@ terminate_pids() {
   kill $pids 2>/dev/null || true
   sleep 0.2
   kill -9 $pids 2>/dev/null || true
+}
+
+kill_stale_headless() {
+  local pids=""
+  pids="$(pgrep -f "ghidra\\.app\\.util\\.headless\\.AnalyzeHeadless ${PROJECT_DIR} ${PROJECT_NAME}" 2>/dev/null || true)"
+  [[ -z "$pids" ]] || { echo "[cleanup] stale headless: $pids"; terminate_pids "$pids"; }
+}
+
+cleanup_project_locks() {
+  rm -f "${PROJECT_DIR}/${PROJECT_NAME}.lock" "${PROJECT_DIR}/${PROJECT_NAME}.lock~"
+  find "${PROJECT_DIR}/${PROJECT_NAME}.rep" -maxdepth 2 \( -name '*.lock' -o -name '*.lock~' \) -delete 2>/dev/null || true
 }
 
 kill_port() {
@@ -110,10 +122,12 @@ cleanup() {
   stop_pid "$DBG_PID"
   stop_pid "$DBG_STDIN_PID"
   stop_pid "$HEADLESS_PID"
+  kill_stale_headless
   rm -f "$DBG_STDIN_FIFO"
   kill_port "$PPORT"
   kill_port "$DPORT"
   kill_port "$HPORT"
+  cleanup_project_locks
   cleanup_artifacts
   echo "[cleanup] done."
 }
@@ -129,6 +143,8 @@ kill_port "$DPORT"
 kill_port "$HPORT"
 kill_port "$PPORT"
 validate_runtime
+kill_stale_headless
+cleanup_project_locks
 
 # Launch GDB In-Process Server (headless)
 # It binds to 0.0.0.0:19090 by default
@@ -141,9 +157,8 @@ if ! has_program; then
   MODE=(-import "$BINARY_PATH")
 fi
 
-# Remove potential project lock file
-rm -f "${PROJECT_DIR}/${PROJECT_NAME}.lock"
-find "${PROJECT_DIR}/${PROJECT_NAME}.rep" -maxdepth 1 -name '*.lock' -delete 2>/dev/null || true
+# Remove potential project lock files
+cleanup_project_locks
 
 env \
   GHIDRA_MCP_BIND_HOST="0.0.0.0" \
@@ -158,8 +173,8 @@ env \
 echo $! > "$HEADLESS_PID"
 
 wait_ready() {
-  local name="$1" port="$2" pid="$3" i=0
-  while ((i < 120)); do
+  local name="$1" port="$2" pid="$3" timeout_secs="${4:-120}" i=0
+  while ((i < timeout_secs)); do
     if (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; then
       exec 3>&-
       return 0
@@ -181,7 +196,7 @@ wait_ready "pwntools_mcp" "$PPORT" "$(cat "$PWN_PID")"
 echo "[ok] Pwntools MCP ready."
 
 echo "[info] Waiting for Ghidra Headless (port $HPORT)..."
-wait_ready "headless" "$HPORT" "$(cat "$HEADLESS_PID")"
+wait_ready "headless" "$HPORT" "$(cat "$HEADLESS_PID")" "$HEADLESS_READY_TIMEOUT"
 echo "[ok] Ghidra Headless ready."
 echo "[ok] debug_bridge pid=$(cat "$DBG_PID"), pwntools pid=$(cat "$PWN_PID"), headless pid=$(cat "$HEADLESS_PID")"
 echo "[info] Services running. Press Ctrl+C to stop."
