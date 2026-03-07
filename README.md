@@ -31,7 +31,7 @@
 ```
 - These files have to run in Ubuntu, so HOST IP will be your wsl or ubuntu ip.
 
-5. Move Target Binary to `mcps/test` & `mcps/pwntools_tools/server/challenge`
+5. Move Target Binary to `mcps/test`
 
 6. Fast run
 ```bash
