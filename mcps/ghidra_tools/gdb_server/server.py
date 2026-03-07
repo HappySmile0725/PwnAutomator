@@ -16,6 +16,7 @@ if SCRIPT_DIR not in sys.path:
 
 from handlers.breakpoints import BreakpointsHandler
 from handlers.execution import ExecutionHandler
+from handlers.gadgets import GadgetHandler
 from handlers.io import IOHandler
 from handlers.management import ManagementHandler
 from handlers.state import StateHandler
@@ -127,6 +128,7 @@ class GdbMcpServer:
         self.bp = BreakpointsHandler(self)
         self.st = StateHandler(self)
         self.io = IOHandler(self)
+        self.gadgets = GadgetHandler(self)
 
         self.cmd_map = {
             "bridge.ping": self.mgmt.handle_ping,
@@ -154,7 +156,9 @@ class GdbMcpServer:
             "debug.read_stdout": self.io.handle_read_stdout,
             "debug.stdin.write": self.io.handle_stdin_write,
             "debug.cmd": self.io.handle_cmd,
-            "debug.events.poll": self.io.handle_events_poll
+            "debug.events.poll": self.io.handle_events_poll,
+            "debug.ropgadget.chall": self.gadgets.handle_ropgadget_chall,
+            "debug.ropgadget.libc": self.gadgets.handle_ropgadget_libc,
         }
 
     def register_event_handlers(self):

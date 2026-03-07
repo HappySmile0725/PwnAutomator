@@ -79,6 +79,8 @@ class ServerCommands:
             "debug.events.poll": DebugHandler.events_poll,
             "debug.cmd": DebugHandler.cmd,
             "debug.restart_server": DebugHandler.restart_server,
+            "debug.ropgadget.chall": DebugHandler.ropgadget_chall,
+            "debug.ropgadget.libc": DebugHandler.ropgadget_libc,
 
             "help": self.get_help
         })
@@ -126,6 +128,8 @@ class ServerCommands:
             "debug.events.poll": "poll async debug events {session_id, max?}",
             "debug.cmd": "execute raw gdb command {session_id, cmd, timeout_ms?}",
             "debug.restart_server": "restart gdb server process",
+            "debug.ropgadget.chall": "run ROPgadget for chall binary {path?, session_id?, timeout_ms?}",
+            "debug.ropgadget.libc": "run ROPgadget for libc {path?, timeout_ms?} (default: local challenge libc or /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "help": "show help message"
         }
     

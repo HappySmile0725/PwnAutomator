@@ -360,6 +360,44 @@ TOOLS: List[Dict[str, Any]] = [
         required=["session_id", "gdb_cmd"],
     ),
     _tool(
+        "debug_ropgadget_chall",
+        "Run ROPgadget --binary against the chall binary path or the currently loaded binary.",
+        properties={
+            "path": {
+                "type": "string",
+                "description": "Optional chall binary path override.",
+            },
+            "session_id": {
+                "type": "string",
+                "description": "Optional debug session id used to resolve the current binary.",
+            },
+            "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 30000,
+                "description": "ROPgadget timeout in milliseconds.",
+            },
+        },
+        required=[],
+    ),
+    _tool(
+        "debug_ropgadget_libc",
+        "Run ROPgadget --binary against libc. Defaults to a local challenge libc or /usr/lib/x86_64-linux-gnu/libc.so.6.",
+        properties={
+            "path": {
+                "type": "string",
+                "description": "Optional libc path override.",
+            },
+            "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 30000,
+                "description": "ROPgadget timeout in milliseconds.",
+            },
+        },
+        required=[],
+    ),
+    _tool(
         "debug_restart_server",
         "Restart the GDB server process (kill and spawn new).",
         properties={},
@@ -482,6 +520,8 @@ TOOL_TO_COMMAND = {
     "debug_events_poll": "debug.events.poll",
     "debug_context": "debug.context",
     "debug_cmd": "debug.cmd",
+    "debug_ropgadget_chall": "debug.ropgadget.chall",
+    "debug_ropgadget_libc": "debug.ropgadget.libc",
     "debug_restart_server": "debug.restart_server",
     "debug_read_stdout": "debug.read_stdout",
 }

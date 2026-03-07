@@ -11,6 +11,12 @@ class DebugHandler:
         return ctx.bridge_call(cmd, args or {})
 
     @staticmethod
+    def _normalize_path_arg(payload, key):
+        if payload.get(key):
+            payload[key] = resolve_path(payload[key])
+        return payload
+
+    @staticmethod
     def _prepare_args(args):
         out = dict(args or {})
 
@@ -160,6 +166,22 @@ class DebugHandler:
     def cmd(args):
         return DebugHandler._bridge("debug.cmd", args)
 
+    @staticmethod
+    def ropgadget_chall(args):
+        payload = dict(args or {})
+        payload = DebugHandler._normalize_path_arg(payload, "path")
+        if not payload.get("path"):
+            binary = DebugHandler._resolve_current_binary(payload)
+            if binary and os.path.exists(binary):
+                payload["path"] = binary
+        return DebugHandler._bridge("debug.ropgadget.chall", payload)
+
+    @staticmethod
+    def ropgadget_libc(args):
+        payload = dict(args or {})
+        payload = DebugHandler._normalize_path_arg(payload, "path")
+        return DebugHandler._bridge("debug.ropgadget.libc", payload)
+
 
 
 COMMANDS = {
@@ -185,4 +207,6 @@ COMMANDS = {
     "debug.events.poll": DebugHandler.events_poll,
     "debug.context": DebugHandler.context,
     "debug.cmd": DebugHandler.cmd,
+    "debug.ropgadget.chall": DebugHandler.ropgadget_chall,
+    "debug.ropgadget.libc": DebugHandler.ropgadget_libc,
 }
