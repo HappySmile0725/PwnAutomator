@@ -14,10 +14,7 @@ SOURCE_SYSTEM = "system"
 
 HANDLERS_DIR = os.path.dirname(os.path.abspath(__file__))
 MCPS_DIR = os.path.normpath(os.path.join(HANDLERS_DIR, "..", "..", ".."))
-LOCAL_LIBC_DIRS = (
-    os.path.join(MCPS_DIR, "pwntools_tools", "challenge"),
-    os.path.join(MCPS_DIR, "pwntools_tools", "server", "challenge"),
-)
+LOCAL_LIBC_DIRS = (os.path.join(MCPS_DIR, "test"),)
 
 
 def _normalize_timeout_ms(value, default_value):

@@ -24,7 +24,9 @@ MAX_BUFFER_BYTES = 1_000_000
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 MCPS_DIR = os.path.abspath(os.path.join(THIS_DIR, "..", ".."))
-DEFAULT_PAYLOAD_DIR = os.path.join(THIS_DIR, "challenge")
+PROJECT_ROOT = os.path.abspath(os.path.join(MCPS_DIR, ".."))
+TEST_DIR = os.path.join(MCPS_DIR, "test")
+FIXED_PAYLOAD_PATH = os.path.join(TEST_DIR, FIXED_PAYLOAD_FILENAME)
 DEFAULT_BINARY_PATH = os.path.join(MCPS_DIR, "test", "chall")
 
 
@@ -59,13 +61,40 @@ def _is_plain_filename(text: str) -> bool:
     return "/" not in text and "\\" not in text and not os.path.isabs(text)
 
 
+def _normalize_path_text(text: str) -> str:
+    return str(text or "").strip().replace("\\", "/")
+
+
 def _resolve_payload_path(path_or_name: str) -> str:
     text = str(path_or_name or "").strip()
+    expected_path = os.path.abspath(FIXED_PAYLOAD_PATH)
     if not text:
-        raise ValueError("payload path is required")
+        return expected_path
+
     if _is_plain_filename(text):
-        text = os.path.join(DEFAULT_PAYLOAD_DIR, text)
-    return os.path.abspath(text)
+        if text != FIXED_PAYLOAD_FILENAME:
+            raise ValueError("payload filename must be hack.py")
+        return expected_path
+
+    normalized = _normalize_path_text(text).lstrip("./")
+    valid_relative = {
+        FIXED_PAYLOAD_FILENAME,
+        "test/" + FIXED_PAYLOAD_FILENAME,
+        "mcps/test/" + FIXED_PAYLOAD_FILENAME,
+    }
+    if normalized in valid_relative:
+        return expected_path
+
+    candidate_paths = (
+        os.path.abspath(text),
+        os.path.abspath(os.path.join(MCPS_DIR, text)),
+        os.path.abspath(os.path.join(PROJECT_ROOT, text)),
+    )
+    for candidate in candidate_paths:
+        if os.path.normcase(candidate) == os.path.normcase(expected_path):
+            return expected_path
+
+    raise ValueError("payload path must be mcps/test/hack.py")
 
 
 def render_payload_template(payload_content: str) -> str:
@@ -126,8 +155,8 @@ class PwntoolsRuntime:
 
     def write_payload(self, payload_content: str) -> Dict[str, Any]:
         try:
-            os.makedirs(DEFAULT_PAYLOAD_DIR, exist_ok=True)
-            output_path = os.path.abspath(os.path.join(DEFAULT_PAYLOAD_DIR, FIXED_PAYLOAD_FILENAME))
+            os.makedirs(TEST_DIR, exist_ok=True)
+            output_path = os.path.abspath(FIXED_PAYLOAD_PATH)
             script = render_payload_template(payload_content)
             with open(output_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(script)
@@ -157,20 +186,17 @@ class PwntoolsRuntime:
 
     def list_payloads(self) -> Dict[str, Any]:
         try:
-            os.makedirs(DEFAULT_PAYLOAD_DIR, exist_ok=True)
+            os.makedirs(TEST_DIR, exist_ok=True)
             entries = []
-            for name in sorted(os.listdir(DEFAULT_PAYLOAD_DIR)):
-                if not name.endswith(".py"):
-                    continue
-                full_path = os.path.join(DEFAULT_PAYLOAD_DIR, name)
+            if os.path.exists(FIXED_PAYLOAD_PATH):
                 entries.append(
                     {
-                        "filename": name,
-                        "path": os.path.abspath(full_path),
-                        "size": os.path.getsize(full_path),
+                        "filename": FIXED_PAYLOAD_FILENAME,
+                        "path": os.path.abspath(FIXED_PAYLOAD_PATH),
+                        "size": os.path.getsize(FIXED_PAYLOAD_PATH),
                     }
                 )
-            return _ok(payloads=entries, directory=os.path.abspath(DEFAULT_PAYLOAD_DIR))
+            return _ok(payloads=entries, directory=os.path.abspath(TEST_DIR))
         except Exception as exc:
             return _error(str(exc))
 

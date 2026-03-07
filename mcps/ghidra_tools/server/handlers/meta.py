@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+import re
 import subprocess
 
 from utils import GhidraContext as ctx, resolve_path
@@ -9,6 +10,8 @@ try:
     TEXT_TYPE = unicode
 except NameError:
     TEXT_TYPE = str
+
+FROM_IMAGE_RE = re.compile(r"^\s*FROM\s+([^\s]+)(?:\s+AS\s+\S+)?\s*$", re.I)
 
 
 class MetaHandler:
@@ -122,9 +125,9 @@ class MetaHandler:
         }
 
     @staticmethod
-    def get_meta(args):
+    def _resolve_binary_path(args):
         args = args or {}
-        
+
         ex_path = args.get("binary_path")
         runtime_path = os.environ.get("GHIDRA_MCP_BINARY_PATH")
         if not ex_path and runtime_path:
@@ -135,6 +138,69 @@ class MetaHandler:
             if p:
                 ex_path = str(p)
 
+        return ex_path, runtime_path
+
+    @staticmethod
+    def _collect_ubuntu(binary_path):
+        resolved_path = resolve_path(binary_path)
+        if not resolved_path:
+            return {"available": False, "error": "No binary path"}
+
+        dockerfile_path = os.path.join(os.path.dirname(resolved_path), "Dockerfile")
+        if not os.path.exists(dockerfile_path):
+            return {
+                "available": False,
+                "resolved_binary_path": resolved_path,
+                "dockerfile_path": dockerfile_path,
+                "error": "Dockerfile not found"
+            }
+
+        try:
+            with open(dockerfile_path, "r") as handle:
+                lines = handle.readlines()
+        except (IOError, OSError) as e:
+            return {
+                "available": False,
+                "resolved_binary_path": resolved_path,
+                "dockerfile_path": dockerfile_path,
+                "error": str(e)
+            }
+
+        for raw_line in lines:
+            line = MetaHandler._to_text(raw_line).strip()
+            if not line or line.startswith("#"):
+                continue
+
+            match = FROM_IMAGE_RE.match(line)
+            if not match:
+                continue
+
+            image = match.group(1)
+            image_lower = image.lower()
+            if image_lower == "ubuntu" or image_lower.startswith("ubuntu:"):
+                version = "latest"
+                if ":" in image:
+                    version = image.split(":", 1)[1]
+                return {
+                    "available": True,
+                    "resolved_binary_path": resolved_path,
+                    "dockerfile_path": dockerfile_path,
+                    "image": image,
+                    "version": version
+                }
+
+        return {
+            "available": False,
+            "resolved_binary_path": resolved_path,
+            "dockerfile_path": dockerfile_path,
+            "error": "Ubuntu base image not found"
+        }
+
+    @staticmethod
+    def get_meta(args):
+        ex_path, runtime_path = MetaHandler._resolve_binary_path(args)
+        ubuntu = MetaHandler._collect_ubuntu(ex_path)
+
         return {
             "name": ctx.program.getName(),
             "arch": str(ctx.program.getLanguage()),
@@ -142,5 +208,7 @@ class MetaHandler:
             "executable_path": ex_path,
             "runtime_binary_path": runtime_path,
             "checksec": MetaHandler._collect_checksec(ex_path),
+            "ubuntu_version": ubuntu.get("version") if ubuntu.get("available") else None,
+            "ubuntu": ubuntu,
             "commands": MetaHandler.CMD_LIST
         }

@@ -104,7 +104,7 @@ class ServerCommands:
             "search.bytes": "search bytes by pattern {pattern}",
             "search.xrefs_to": "find xrefs to address {addr}",
             "search.xrefs_from": "find xrefs from address {addr}",
-            "meta": "get binary metadata (includes checksec, optional: {binary_path})",
+            "meta": "get binary metadata (includes checksec, ubuntu info, optional: {binary_path})",
             "debug.open": "launch binary under gdb/mi {binary?, argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
             "debug.open.current": "launch current program with gdb/mi {argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
             "debug.run": "run binary {session_id, input?, binary?}",

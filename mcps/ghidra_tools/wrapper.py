@@ -426,16 +426,23 @@ TOOLS: List[Dict[str, Any]] = [
     ),
     _tool(
         "pwn_payload_read",
-        "Read payload script and parsed payload body.",
-        properties={"path": {"type": "string"}},
-        required=["path"],
+        "Read fixed payload script mcps/test/hack.py and parsed payload body.",
+        properties={
+            "path": {
+                "type": "string",
+                "description": "Optional. Only mcps/test/hack.py is accepted.",
+            }
+        },
     ),
-    _tool("pwn_payload_list", "List saved payload scripts."),
+    _tool("pwn_payload_list", "List fixed payload script in mcps/test."),
     _tool(
         "pwn_payload_execute",
-        "Execute payload against fixed target mcps/test/chall.",
+        "Execute fixed payload mcps/test/hack.py against fixed target mcps/test/chall.",
         properties={
-            "path": {"type": "string"},
+            "path": {
+                "type": "string",
+                "description": "Optional. Only mcps/test/hack.py is accepted.",
+            },
             "pause_before_payload": {"type": "boolean", "default": False},
             "wait_ms": {
                 "type": "integer",
@@ -444,7 +451,6 @@ TOOLS: List[Dict[str, Any]] = [
                 "description": "Wait for initial stdout/stderr collection before returning.",
             },
         },
-        required=["path"],
     ),
     _tool(
         "pwn_session_poll",

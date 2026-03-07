@@ -1,13 +1,9 @@
 """Payload-related MCP handlers."""
 
 from __future__ import annotations
-
 from typing import Any, Dict
-
 import pwn_runtime as runtime
-
-from .common import parse_bool, require_arg, require_text_arg
-
+from .common import parse_bool, require_arg
 
 def handle_payload_write(args: Dict[str, Any]) -> Dict[str, Any]:
     payload_content = require_arg(args, "payload_content")
@@ -15,7 +11,7 @@ def handle_payload_write(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_payload_read(args: Dict[str, Any]) -> Dict[str, Any]:
-    path = require_text_arg(args, "path")
+    path = str(args.get("path") or runtime.FIXED_PAYLOAD_FILENAME)
     return runtime.read_payload(path=path)
 
 
@@ -25,7 +21,7 @@ def handle_payload_list(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_payload_execute(args: Dict[str, Any]) -> Dict[str, Any]:
-    path = require_text_arg(args, "path")
+    path = str(args.get("path") or runtime.FIXED_PAYLOAD_FILENAME)
     pause_before_payload = parse_bool(args.get("pause_before_payload", False))
     wait_ms = args.get("wait_ms", 300)
     return runtime.execute_payload(
