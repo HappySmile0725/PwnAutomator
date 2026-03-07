@@ -3,10 +3,11 @@
 ```python
 from pwn import *
 p = process("./chall")
+e = ELF("./chall", checksec=false)
 
 p.interactive()
 ```
-위 기본 틀은 pwntools mcp에서 자동으로 wrapping하여 페이로드 파일을 생성하므로 위 페이로드 생성 시 위 3줄의 코드는 적을 필요 없음.
+위 기본 틀은 pwntools mcp에서 자동으로 wrapping하여 페이로드 파일을 생성하므로 위 페이로드 생성 시 위 4줄의 코드는 적을 필요 없음.
 
 2. 다음 규칙을 따를 것.
     - 코드는 최대한 간결하고 최소화시켜서 작성해야 함.
