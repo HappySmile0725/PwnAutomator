@@ -386,7 +386,12 @@ TOOLS: List[Dict[str, Any]] = [
         properties={
             "path": {
                 "type": "string",
-                "description": "Optional libc path override.",
+                "description": "Optional libc path override. If set, this takes precedence over `source`.",
+            },
+            "source": {
+                "type": "string",
+                "enum": ["local", "system"],
+                "description": "Optional libc source selection: `local` uses mcps/test/libc.so.6, `system` uses /usr/lib/x86_64-linux-gnu/libc.so.6.",
             },
             "timeout_ms": {
                 "type": "integer",

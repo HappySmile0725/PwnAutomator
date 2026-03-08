@@ -11,6 +11,7 @@ SOURCE_EXPLICIT = "explicit"
 SOURCE_CURRENT = "current"
 SOURCE_LOCAL = "local"
 SOURCE_SYSTEM = "system"
+LIBC_SOURCE_CHOICES = (SOURCE_LOCAL, SOURCE_SYSTEM)
 
 HANDLERS_DIR = os.path.dirname(os.path.abspath(__file__))
 MCPS_DIR = os.path.normpath(os.path.join(HANDLERS_DIR, "..", "..", ".."))
@@ -31,6 +32,13 @@ def _normalize_path(path):
     if not text:
         return ""
     return os.path.realpath(text)
+
+
+def _normalize_libc_source(value):
+    text = str(value or "").strip().lower()
+    if text in LIBC_SOURCE_CHOICES:
+        return text
+    return ""
 
 
 def _looks_like_libc(path):
@@ -162,6 +170,20 @@ class GadgetHandler(GdbHandler):
             if not os.path.exists(path):
                 return "", "", "binary not found: " + path
             return path, SOURCE_EXPLICIT, ""
+
+        source = _normalize_libc_source(args.get("source"))
+        if source == SOURCE_LOCAL:
+            local_path = _find_local_libc_path()
+            if not local_path:
+                return "", "", "local libc not found under mcps/test"
+            return local_path, SOURCE_LOCAL, ""
+        if source == SOURCE_SYSTEM:
+            path = _normalize_path(DEFAULT_LIBC_PATH)
+            if not os.path.exists(path):
+                return "", "", "binary not found: " + path
+            return path, SOURCE_SYSTEM, ""
+        if args.get("source") is not None:
+            return "", "", "source must be one of: local, system"
 
         local_path = _find_local_libc_path()
         if local_path:
