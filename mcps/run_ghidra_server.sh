@@ -64,12 +64,12 @@ stop_pid() {
   if [[ -f "$pf" ]]; then
     pid="$(cat "$pf" 2>/dev/null || true)"
   fi
-  
+
   if [[ -n "$pid" ]]; then
     # Kill children first (important for Ghidra which spawns Java)
     echo "[cleanup] killing children of ${pid}..."
     pkill -P "$pid" 2>/dev/null || true
-    
+
     # Kill the process
     kill "$pid" 2>/dev/null || true
     sleep 0.2
