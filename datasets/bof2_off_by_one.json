@@ -4,7 +4,7 @@
     "binary": "/home/ksh/PwnAutomator/mcps/test/chall",
     "arch": "i386-32-little",
     "purpose": "Fine-tuning dataset for automated binary exploit reasoning",
-    "ubuntu": "16.04",
+    "ubuntu": "22.04",
     "result": "shell acquired via system('/bin/sh')"
   },
   "protections": {
