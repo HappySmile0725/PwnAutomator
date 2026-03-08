@@ -4,6 +4,7 @@
     "binary": "/mnt/d/Coding/Projects/PwnAutomator/mcps/test/chall",
     "arch": "amd64",
     "purpose": "Fine-tuning dataset for automated binary exploit reasoning",
+    "ubuntu": "22.04",
     "result": "shell acquired (uid=1000(happysmile))"
   },
   "protections": {
