@@ -7,10 +7,21 @@ const paths = require('./paths');
 const { appendLog, startUploadedRun } = require('./state.service');
 const { findDockerContext, resolveTrackingFiles } = require('./docker.service');
 
+const activeWorkspaceDirs = [
+    paths.uploadDir,
+    paths.challengeDir,
+    paths.solutionDir,
+    paths.codexDir,
+    paths.datasetDir,
+    paths.traceDir
+];
+
 const createRunId = () => {
     const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
     return `${stamp}-${crypto.randomBytes(3).toString('hex')}`;
 };
+
+const exists = async (filePath) => Boolean(filePath) && fs.access(filePath).then(() => true).catch(() => false);
 
 const normalizeUploadName = (name) => {
     const base = path.basename(String(name || 'challenge.bin').replace(/\\/g, '/'));
@@ -25,30 +36,31 @@ const resolveUploadFiles = (req) => {
     return Object.values(req.files).flatMap((value) => Array.isArray(value) ? value : [value]).filter(Boolean);
 };
 
-const ensureWorkspaceRoot = async () => {
-    const resolvedStorage = path.resolve(paths.storageDir);
-    const resolvedNow = path.resolve(paths.nowDir);
-    const resolvedMcp = path.resolve(paths.mcpDir);
-    const resolvedChallenge = path.resolve(paths.challengeDir);
+const isInside = (baseDir, targetPath) => {
+    const base = path.resolve(baseDir);
+    const target = path.resolve(targetPath);
+    return target === base || target.startsWith(`${base}${path.sep}`);
+};
 
-    if (!resolvedNow.startsWith(resolvedStorage)) {
+const resetCurrentWorkspace = async () => {
+    if (!isInside(paths.storageDir, paths.nowDir)) {
         throw new Error('Invalid workspace path.');
     }
-    if (!resolvedChallenge.startsWith(`${resolvedMcp}${path.sep}`)) {
+    if (!isInside(paths.mcpDir, paths.challengeDir) || path.resolve(paths.challengeDir) === path.resolve(paths.mcpDir)) {
         throw new Error('Challenge workspace must stay inside the MCP directory.');
     }
+    for (const dir of activeWorkspaceDirs.filter((dir) => dir !== paths.challengeDir)) {
+        if (!isInside(paths.nowDir, dir)) {
+            throw new Error(`Invalid managed workspace path: ${dir}`);
+        }
+    }
 
-    await fs.rm(paths.nowDir, { recursive: true, force: true });
-    await fs.rm(paths.challengeDir, { recursive: true, force: true });
-    await fs.mkdir(paths.uploadDir, { recursive: true });
-    await fs.mkdir(paths.challengeDir, { recursive: true });
-    await fs.mkdir(paths.solutionDir, { recursive: true });
+    await Promise.all([paths.nowDir, paths.challengeDir].map((dir) => fs.rm(dir, { recursive: true, force: true })));
+    await Promise.all(activeWorkspaceDirs.map((dir) => fs.mkdir(dir, { recursive: true })));
 };
 
 const assertInside = (baseDir, targetPath) => {
-    const base = path.resolve(baseDir);
-    const target = path.resolve(targetPath);
-    if (target !== base && !target.startsWith(`${base}${path.sep}`)) {
+    if (!isInside(baseDir, targetPath)) {
         throw new Error(`Unsafe archive entry: ${targetPath}`);
     }
 };
@@ -129,14 +141,30 @@ const writeMcpWorkspaceMetadata = async ({ runId, contextDir, dockerfilePath, tr
         updatedAt: new Date().toISOString()
     };
 
-    await fs.mkdir(paths.challengeMetaDir, { recursive: true });
-    await fs.writeFile(path.join(paths.challengeMetaDir, 'manifest.json'), JSON.stringify(payload, null, 2), 'utf8');
     if (binaryPath) {
+        await fs.mkdir(paths.challengeMetaDir, { recursive: true });
         await fs.writeFile(path.join(paths.challengeMetaDir, 'current_binary'), binaryPath, 'utf8');
     }
 
     return payload;
 };
+
+const resolveChallengeLayout = async () => {
+    const contextDir = findDockerContext(paths.challengeDir) || paths.challengeDir;
+    const dockerfilePath = path.join(contextDir, 'Dockerfile');
+    const hasDockerfile = await exists(dockerfilePath);
+    return {
+        contextDir,
+        dockerfilePath: hasDockerfile ? dockerfilePath : null,
+        trackingFiles: resolveTrackingFiles(hasDockerfile ? dockerfilePath : null, contextDir)
+    };
+};
+
+const publicUploadInfo = (file) => ({
+    originalName: file.originalName,
+    savedName: file.savedName,
+    size: file.size
+});
 
 const handleChallengeUpload = async (req) => {
     const uploadFiles = resolveUploadFiles(req);
@@ -145,38 +173,27 @@ const handleChallengeUpload = async (req) => {
     }
 
     try {
-        await ensureWorkspaceRoot();
+        await resetCurrentWorkspace();
 
-        const savedFiles = [];
-        for (const file of uploadFiles) {
-            savedFiles.push(await saveUploadedFile(file, paths.uploadDir));
-        }
-
+        const savedFiles = await Promise.all(uploadFiles.map((file) => saveUploadedFile(file, paths.uploadDir)));
         await importChallengeFiles(savedFiles);
 
         const runId = createRunId();
-        const contextDir = findDockerContext(paths.challengeDir) || paths.challengeDir;
-        const dockerfilePath = contextDir ? path.join(contextDir, 'Dockerfile') : null;
-        const hasDockerfile = dockerfilePath && await fs.access(dockerfilePath).then(() => true).catch(() => false);
-        const trackingFiles = resolveTrackingFiles(hasDockerfile ? dockerfilePath : null, contextDir);
+        const { contextDir, dockerfilePath, trackingFiles } = await resolveChallengeLayout();
         const mcpWorkspace = await writeMcpWorkspaceMetadata({
             runId,
             contextDir,
-            dockerfilePath: hasDockerfile ? dockerfilePath : null,
+            dockerfilePath,
             trackingFiles
         });
         const state = startUploadedRun({
             runId,
             challenge: {
                 uploadedAt: new Date().toISOString(),
-                uploads: savedFiles.map((file) => ({
-                    originalName: file.originalName,
-                    savedName: file.savedName,
-                    size: file.size
-                })),
+                uploads: savedFiles.map(publicUploadInfo),
                 rootDir: paths.challengeDir,
                 contextDir,
-                dockerfilePath: hasDockerfile ? dockerfilePath : null,
+                dockerfilePath,
                 trackingFiles,
                 mcpWorkspace
             }
@@ -184,7 +201,7 @@ const handleChallengeUpload = async (req) => {
 
         appendLog('info', `Uploaded ${savedFiles.length} challenge file(s).`);
         appendLog('info', `Unified challenge workspace: ${path.relative(paths.repoRoot, paths.challengeDir) || '.'}`);
-        if (hasDockerfile) {
+        if (dockerfilePath) {
             appendLog('info', `Docker context: ${path.relative(paths.repoRoot, contextDir) || '.'}`);
         } else {
             appendLog('warn', 'Dockerfile was not found in the uploaded challenge.');

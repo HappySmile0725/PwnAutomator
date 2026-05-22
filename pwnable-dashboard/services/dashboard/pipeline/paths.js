@@ -26,7 +26,7 @@ module.exports = {
     challengeMetaDir: path.join(challengeDir, '.pwnautomator'),
     codexDir: path.join(nowDir, 'codex'),
     solutionDir: path.join(nowDir, 'solution'),
-    datasetDraftDir: path.join(nowDir, 'dataset'),
+    datasetDir: path.join(nowDir, 'dataset'),
     traceDir: path.join(nowDir, 'trace'),
     historyDir: path.join(storageDir, 'history'),
     rootDatasetsDir: path.join(repoRoot, 'datasets'),

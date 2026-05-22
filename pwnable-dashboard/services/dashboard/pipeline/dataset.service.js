@@ -1,27 +1,67 @@
 const fs = require('fs').promises;
-const fssync = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
 
 const paths = require('./paths');
-const { publishRawTrace, readTraceAsJson, tracePathsForRun } = require('./trace.service');
+const { publishRawTrace } = require('./trace.service');
 
-const exists = async (filePath) => fs.access(filePath).then(() => true).catch(() => false);
+const exists = async (filePath) => Boolean(filePath) && fs.access(filePath).then(() => true).catch(() => false);
+const packageName = (number, problemName) => `DataSet${number}_${problemName}.zip`;
 
-const addFileIfExists = async (zip, sourcePath, zipPath) => {
+const sanitizeDatasetName = (value) => {
+    const normalized = String(value || 'challenge')
+        .replace(/\.[^.\\/]+$/g, '')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return normalized || 'challenge';
+};
+
+const resolveProblemName = (state) => {
+    const targetBinary = state.challenge?.mcpWorkspace?.targetBinaryPath;
+    const trackingFile = Array.isArray(state.challenge?.trackingFiles) ? state.challenge.trackingFiles[0] : '';
+    const firstUpload = Array.isArray(state.challenge?.uploads) ? state.challenge.uploads[0] : null;
+    const rawName = targetBinary || trackingFile || firstUpload?.originalName || firstUpload?.savedName || state.runId;
+    return sanitizeDatasetName(path.basename(rawName || 'challenge'));
+};
+
+const nextDatasetNumber = async () => {
+    await fs.mkdir(paths.rootDatasetPackageDir, { recursive: true });
+    const entries = await fs.readdir(paths.rootDatasetPackageDir).catch(() => []);
+    const numbers = entries
+        .map((name) => name.match(/^DataSet(\d+)_.*\.zip$/i))
+        .filter(Boolean)
+        .map((match) => Number(match[1]))
+        .filter(Number.isFinite);
+    return numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+};
+
+const resolveDatasetPackagePath = async (state) => {
+    const number = await nextDatasetNumber();
+    const problemName = resolveProblemName(state);
+    const name = packageName(number, problemName);
+    return {
+        datasetNumber: number,
+        problemName,
+        packageName: name,
+        packagePath: path.join(paths.rootDatasetPackageDir, name)
+    };
+};
+
+const addLocalFile = async (zip, sourcePath, zipPath) => {
     if (await exists(sourcePath)) {
         zip.addLocalFile(sourcePath, path.dirname(zipPath), path.basename(zipPath));
-        return true;
+        return sourcePath;
     }
-    return false;
+    return null;
 };
 
-const addTextFile = (zip, zipPath, content) => {
-    zip.addFile(zipPath, Buffer.from(String(content || ''), 'utf8'));
-};
-
-const addJsonFile = (zip, zipPath, payload) => {
-    addTextFile(zip, zipPath, JSON.stringify(payload, null, 2));
+const firstExisting = async (...filePaths) => {
+    for (const filePath of filePaths.filter(Boolean)) {
+        if (await exists(filePath)) {
+            return filePath;
+        }
+    }
+    return null;
 };
 
 const addOriginalUploads = async (zip, state) => {
@@ -33,7 +73,7 @@ const addOriginalUploads = async (zip, state) => {
             continue;
         }
         const sourcePath = path.join(paths.uploadDir, savedName);
-        if (await addFileIfExists(zip, sourcePath, path.join('uploads', savedName))) {
+        if (await addLocalFile(zip, sourcePath, path.join('uploads', savedName))) {
             added.push(savedName);
         }
     }
@@ -52,109 +92,86 @@ const addChallengeWorkspaceZip = async (zip) => {
 };
 
 const addExploitFiles = async (zip) => {
-    const exploitPath = path.join(paths.solutionDir, 'exploit.py');
-    const hackPath = path.join(paths.challengeDir, 'hack.py');
+    const candidates = [
+        path.join(paths.solutionDir, 'exploit.py'),
+        path.join(paths.challengeDir, 'hack.py')
+    ];
     const added = [];
 
-    if (await addFileIfExists(zip, exploitPath, 'exploit/exploit.py')) {
-        added.push(exploitPath);
+    for (const sourcePath of candidates) {
+        const targetName = added.length === 0 ? 'exploit.py' : path.basename(sourcePath);
+        const addedPath = await addLocalFile(zip, sourcePath, path.join('exploit', targetName));
+        if (addedPath) {
+            added.push(addedPath);
+        }
     }
-    if (await addFileIfExists(zip, hackPath, added.length === 0 ? 'exploit/exploit.py' : 'exploit/hack.py')) {
-        added.push(hackPath);
+
+    return added;
+};
+
+const addCodexFiles = async (zip) => {
+    const files = [
+        { source: path.join(paths.codexDir, 'manifest.json'), target: 'codex/manifest.json' },
+        { source: path.join(paths.codexDir, 'codex_task.md'), target: 'codex/codex_task.md' }
+    ];
+    const added = [];
+
+    for (const file of files) {
+        const addedPath = await addLocalFile(zip, file.source, file.target);
+        if (addedPath) {
+            added.push(file.target);
+        }
     }
 
     return added;
 };
 
 const addRawTraceFiles = async (zip, rawTrace) => {
-    const traceSource = rawTrace.rawDatasetPath && await exists(rawTrace.rawDatasetPath)
-        ? rawTrace.rawDatasetPath
-        : rawTrace.currentTracePath;
-    const metaSource = rawTrace.rawMetadataPath && await exists(rawTrace.rawMetadataPath)
-        ? rawTrace.rawMetadataPath
-        : rawTrace.currentMetadataPath;
+    const traceSource = await firstExisting(rawTrace.rawDatasetPath, rawTrace.currentTracePath);
     const added = [];
 
-    if (await addFileIfExists(zip, traceSource, 'raw/codex_raw_trace.jsonl')) {
+    if (await addLocalFile(zip, traceSource, 'raw/codex_raw_trace.jsonl')) {
         added.push(traceSource);
-    }
-    if (await addFileIfExists(zip, metaSource, 'raw/codex_raw_trace.meta.json')) {
-        added.push(metaSource);
-    }
-
-    const events = await readTraceAsJson(traceSource);
-    if (events.length > 0) {
-        addJsonFile(zip, 'raw/codex_raw_trace.json', events);
-        added.push('raw/codex_raw_trace.json');
     }
 
     return added;
 };
 
-const saveDatasetDraft = async (state) => {
-    await fs.mkdir(paths.datasetDraftDir, { recursive: true });
-    await fs.mkdir(paths.rootDatasetPackageDir, { recursive: true });
+const saveDatasetPackage = async (state) => {
+    await Promise.all([
+        fs.mkdir(paths.datasetDir, { recursive: true }),
+        fs.mkdir(paths.rootDatasetPackageDir, { recursive: true })
+    ]);
+
     const rawTrace = await publishRawTrace({
         runId: state.runId,
-        status: state.codex?.status || state.status || 'draft'
+        status: state.codex?.status || state.status || 'saved'
     });
-
-    const draft = {
-        version: 1,
-        schemaStatus: 'pending',
-        savedAt: new Date().toISOString(),
-        runId: state.runId,
-        challenge: state.challenge,
-        docker: state.docker,
-        runtime: state.runtime,
-        codex: state.codex,
-        rawTrace,
-        rawTraceFallback: tracePathsForRun(state.runId),
-        note: 'Dataset schema is pending. Replace this draft writer after the final schema is defined.'
-    };
-    const filePath = path.join(paths.datasetDraftDir, 'dataset_draft.json');
-    await fs.writeFile(filePath, JSON.stringify(draft, null, 2), 'utf8');
 
     const zip = new AdmZip();
     const uploadedFiles = await addOriginalUploads(zip, state);
     const challengeWorkspaceAdded = await addChallengeWorkspaceZip(zip);
     const exploitFiles = await addExploitFiles(zip);
     const rawTraceFiles = await addRawTraceFiles(zip, rawTrace);
-    await addFileIfExists(zip, filePath, 'dataset_draft.json');
-    await addFileIfExists(zip, path.join(paths.codexDir, 'manifest.json'), 'codex/manifest.json');
-    await addFileIfExists(zip, path.join(paths.codexDir, 'codex_task.md'), 'codex/codex_task.md');
+    const codexFiles = await addCodexFiles(zip);
 
-    const manifest = {
-        version: 1,
-        runId: state.runId,
-        createdAt: new Date().toISOString(),
-        uploadedFiles,
-        challengeWorkspaceAdded,
-        exploitFiles,
-        rawTraceFiles,
-        datasetDraftPath: filePath,
-        rawTrace,
-        note: 'This package intentionally keeps raw Codex-visible output and MCP responses for later fine-tuning preprocessing.'
-    };
-    addJsonFile(zip, 'package_manifest.json', manifest);
+    const datasetPackage = await resolveDatasetPackagePath(state);
+    const packagePath = datasetPackage.packagePath;
+    const currentPackagePath = path.join(paths.datasetDir, 'dataset_package.zip');
 
-    const safeRunId = String(state.runId || 'manual').replace(/[^a-zA-Z0-9_.-]/g, '-');
-    const packagePath = path.join(paths.rootDatasetPackageDir, `${safeRunId || 'manual'}.zip`);
-    const currentPackagePath = path.join(paths.datasetDraftDir, 'dataset_package.zip');
     zip.writeZip(packagePath);
     if (packagePath !== currentPackagePath) {
         await fs.copyFile(packagePath, currentPackagePath);
     }
 
-    const packageSize = await fs.stat(packagePath).then((stat) => stat.size).catch(() => 0);
-    if (!fssync.existsSync(packagePath)) {
-        throw new Error('Dataset package was not created.');
-    }
+    const packageSize = (await fs.stat(packagePath)).size;
 
     return {
-        status: 'waiting_schema',
-        filePath,
+        status: 'saved',
         packagePath,
+        packageName: datasetPackage.packageName,
+        datasetNumber: datasetPackage.datasetNumber,
+        problemName: datasetPackage.problemName,
         currentPackagePath,
         packageSize,
         rawTrace,
@@ -162,10 +179,11 @@ const saveDatasetDraft = async (state) => {
             uploadedFiles,
             challengeWorkspaceAdded,
             exploitFiles,
-            rawTraceFiles
+            rawTraceFiles,
+            codexFiles
         },
-        message: 'Dataset draft saved. Final schema is pending.'
+        message: 'Dataset package saved.'
     };
 };
 
-module.exports = { saveDatasetDraft };
+module.exports = { saveDatasetPackage };

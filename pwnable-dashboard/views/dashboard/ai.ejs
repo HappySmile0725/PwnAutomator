@@ -18,7 +18,7 @@
         const contextDir = pipelineData.challenge?.contextDir || '-';
         const containerName = pipelineData.docker?.containerName || '-';
         const promptPath = pipelineData.codex?.promptPath || '-';
-        const datasetPath = pipelineData.dataset?.packagePath || pipelineData.dataset?.filePath || '-';
+        const datasetPath = pipelineData.dataset?.packagePath || '-';
     %>
     <div class="bg-grid"></div>
     <div class="dashboard">
@@ -264,7 +264,7 @@
             metaEls.contextDir.textContent = data.challenge?.contextDir || '-';
             metaEls.containerName.textContent = data.docker?.containerName || '-';
             metaEls.promptPath.textContent = data.codex?.promptPath || '-';
-            metaEls.datasetPath.textContent = data.dataset?.packagePath || data.dataset?.filePath || '-';
+            metaEls.datasetPath.textContent = data.dataset?.packagePath || '-';
 
             const running = data.status === 'running';
             const codexRunning = running && data.currentStage === 'codex_agent';

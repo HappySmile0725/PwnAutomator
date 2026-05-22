@@ -8,6 +8,13 @@ const wantsJson = (req) => {
     return req.xhr || accept.includes('application/json');
 };
 
+const sendError = (req, res, statusCode, title, message) => {
+    if (wantsJson(req)) {
+        return res.status(statusCode).json({ success: false, error: message });
+    }
+    return res.status(statusCode).render('dashboard/error', { title, error: message });
+};
+
 const renderAi = (res, statusCode = 200) => {
     const pipeline = pipelineService.getPipelineView();
     return res.status(statusCode).render('dashboard/ai', {
@@ -67,19 +74,10 @@ const uploadChallenge = async (req, res) => {
         if (wantsJson(req)) {
             return res.status(400).json(result);
         }
-        return res.status(400).render('dashboard/error', {
-            title: 'Upload Error',
-            error: result.error || 'File upload failed.'
-        });
+        return sendError(req, res, 400, 'Upload Error', result.error || 'File upload failed.');
     } catch (error) {
         console.error('Upload Error:', error);
-        if (wantsJson(req)) {
-            return res.status(500).json({ success: false, error: 'Internal server error during upload.' });
-        }
-        return res.status(500).render('dashboard/error', {
-            title: 'Upload Error',
-            error: 'Internal server error during upload.'
-        });
+        return sendError(req, res, 500, 'Upload Error', 'Internal server error during upload.');
     }
 };
 
@@ -101,13 +99,7 @@ const runPipeline = async (req, res) => {
         return sendPipelineResponse(req, res, result, result.success ? 202 : 400);
     } catch (error) {
         console.error('AI Run Error:', error);
-        if (wantsJson(req)) {
-            return res.status(500).json({ success: false, error: 'Internal server error during pipeline run.' });
-        }
-        return res.status(500).render('dashboard/error', {
-            title: 'Pipeline Error',
-            error: 'Internal server error during pipeline run.'
-        });
+        return sendError(req, res, 500, 'Pipeline Error', 'Internal server error during pipeline run.');
     }
 };
 
@@ -121,9 +113,9 @@ const cancelPipeline = async (req, res) => {
     }
 };
 
-const saveDatasetDraft = async (req, res) => {
+const saveDatasetPackage = async (req, res) => {
     try {
-        const result = await pipelineService.saveCurrentDatasetDraft();
+        const result = await pipelineService.saveCurrentDatasetPackage();
         return sendPipelineResponse(req, res, result, result.success ? 200 : 400);
     } catch (error) {
         console.error('Dataset Save Error:', error);
@@ -136,7 +128,7 @@ module.exports = {
     cancelPipeline,
     hardwareStatus,
     runPipeline,
-    saveDatasetDraft,
+    saveDatasetPackage,
     showAi,
     showDashboard,
     uploadChallenge

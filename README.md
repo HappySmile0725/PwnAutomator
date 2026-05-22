@@ -1,185 +1,310 @@
 # PwnAutomator
----
 
-## Summary
-- CTF Pwnable Auto Solver
----
+PwnAutomator is a web dashboard for running an automated pwnable challenge workflow with Codex and MCP tools.
 
-## Dashboard Pipeline
-The web dashboard now follows this flow:
+The dashboard follows an MVC structure:
 
-1. Challenge Upload
-2. Docker Build
-3. Container Start
-4. Inspect Runtime
-5. Codex Agent
-   - Ghidra MCP
-   - GDB MCP
-   - Pwntools MCP
-6. Dataset Save
+- `pwnable-dashboard/controllers`: HTTP request/response handling
+- `pwnable-dashboard/routers`: route mapping
+- `pwnable-dashboard/services`: pipeline, Codex, Docker, MCP, and dataset logic
+- `pwnable-dashboard/models`: persisted dashboard state
+- `pwnable-dashboard/views`: EJS pages
 
-MCP servers are treated as external services. Start them yourself before running Codex; the dashboard only prepares the Codex task manifest/prompt and optionally launches a configured Codex command.
+## Pipeline
 
-Optional environment variables:
-
-```bash
-CODEX_AGENT_COMMAND=codex
-CODEX_AGENT_MODEL=gpt-5.3-codex
-CODEX_MCP_AUTOCONFIG=true
-CODEX_MCP_PROFILE=pwnautomator
-CODEX_MCP_SERVER_NAME=pwnautomator
-CODEX_MCP_WRAPPER=mcps/ghidra_tools/wrapper.py
-CODEX_AGENT_ARGS="exec --json -m gpt-5.3-codex --profile-v2 pwnautomator -"
-CODEX_AGENT_JSON_TRACE=true
-CODEX_SYSTEM_PROMPT_FILE=guidline_docs/codex-system-prompt.md
-CODEX_PROMPT_MAX_BYTES=262144
-PWN_AUTOMATOR_TRACE_ENABLED=true
-EXPLOIT_VERIFY_COMMAND="python {exploitPath}"
-UPLOAD_LIMIT_BYTES=209715200
+```text
+Challenge Upload
+  -> Docker Build
+  -> Container Start
+  -> Inspect Runtime
+  -> Codex Agent
+       -> Ghidra MCP
+       -> GDB MCP
+       -> Pwntools MCP
+  -> Dataset Save
 ```
 
-Codex autorun is enabled by default. Set `CODEX_AGENT_AUTORUN=false` to pause at Codex Agent and only write the prompt/manifest under `pwnable-dashboard/data/storage/now/codex`.
-Uploaded challenge files are extracted into the single MCP/web workspace: `mcps/test`.
+MCP servers are external. The dashboard prepares the Codex prompt/profile and launches Codex, but it does not start MCP servers.
 
-Dataset schema is intentionally pending. The current save step writes a draft JSON under `pwnable-dashboard/data/storage/now/dataset`.
----
+## Requirements
 
-## WSL/Ubuntu run
-Run the dashboard, Codex CLI, Docker, and MCP servers inside the same WSL/Ubuntu environment. Do not run the dashboard on Windows while trying to launch Codex in WSL; paths must stay in one Linux namespace.
+Run the dashboard, Docker, Codex CLI, and MCP servers in the same WSL/Ubuntu environment.
 
-1. Open WSL/Ubuntu and move to the repo.
+Required tools:
+
+- Node.js 20 or newer
+- Docker
+- Codex CLI installed and logged in inside WSL/Ubuntu
+- Python packages required by the MCP servers, such as `fastmcp` and `pwntools`
+- Ghidra unpacked under `mcps`
+
+Recommended Codex install inside WSL/Ubuntu:
+
+```bash
+npm install -g @openai/codex@latest --include=optional
+codex login
+codex login status
+```
+
+If `which codex` points to `/mnt/c/...`, install Codex again inside WSL. Do not use the Windows Codex install from WSL.
+
+## Quick Start
+
 ```bash
 cd /mnt/d/Coding/Projects/PwnAutomator
-```
-
-2. Install dashboard dependencies.
-```bash
 cd pwnable-dashboard
 npm install
 cp .env.example .env
 cd ..
-```
-
-3. Make sure Codex is installed and authenticated inside WSL/Ubuntu.
-```bash
-which codex
-codex login
-```
-
-4. Start the dashboard in WSL/Ubuntu.
-```bash
 bash scripts/start-dashboard-wsl.sh
 ```
 
-Default dashboard URL:
+Dashboard URL:
+
 ```text
 http://localhost:3000
 ```
 
-5. Upload a challenge from the dashboard. The uploaded challenge becomes the single shared workspace:
+After uploading a challenge from the dashboard, start MCP servers manually:
+
+```bash
+cd /mnt/d/Coding/Projects/PwnAutomator/mcps
+./run_ghidra_server.sh
+```
+
+Then click `Start Pipeline` in the dashboard.
+
+## Active Workspace
+
+Uploaded challenge files are normalized into one shared workspace:
+
 ```text
 mcps/test
 ```
 
-6. Start MCP servers manually from WSL/Ubuntu after upload.
+When a new challenge is uploaded, the dashboard resets:
+
+```text
+mcps/test
+pwnable-dashboard/data/storage/now/upload
+pwnable-dashboard/data/storage/now/solution
+pwnable-dashboard/data/storage/now/codex
+pwnable-dashboard/data/storage/now/dataset
+pwnable-dashboard/data/storage/now/trace
+```
+
+## Codex
+
+Codex autorun is enabled by default.
+
+Default command:
+
+```bash
+codex exec --json -m gpt-5.3-codex --profile-v2 pwnautomator -
+```
+
+Before Codex starts, the dashboard writes a Codex MCP profile:
+
+```text
+$CODEX_HOME/pwnautomator.config.toml
+```
+
+That profile points Codex to:
+
+```text
+mcps/ghidra_tools/wrapper.py
+```
+
+The generated LLM input files are written to:
+
+```text
+pwnable-dashboard/data/storage/now/codex/manifest.json
+pwnable-dashboard/data/storage/now/codex/codex_task.md
+```
+
+`manifest.json` is intentionally small. It only stores runtime context Codex needs: challenge path, target binary, container reference, solution output paths, MCP endpoints, and the active JSONL trace path.
+
+The system prompt is file-first:
+
+```text
+guidline_docs/codex-system-prompt.md
+```
+
+Override it with:
+
+```bash
+CODEX_SYSTEM_PROMPT_FILE=path/to/system-prompt.md
+```
+
+Short inline overrides are also supported:
+
+```bash
+CODEX_SYSTEM_PROMPT="system instructions"
+CODEX_USER_PROMPT="solve the pwnable challenge"
+```
+
+To disable autorun and only write the Codex task files:
+
+```bash
+CODEX_AGENT_AUTORUN=false bash scripts/start-dashboard-wsl.sh
+```
+
+## MCP Servers
+
+The default MCP ports are:
+
+```text
+Ghidra MCP:   9999
+GDB MCP:      19090
+Pwntools MCP: 19191
+```
+
+Start all MCP services with:
+
 ```bash
 cd mcps
 ./run_ghidra_server.sh
 ```
 
-7. Click `Run Pipeline` in the dashboard. The dashboard runs Codex in WSL/Ubuntu with:
-```bash
-codex exec --json -m gpt-5.3-codex --profile-v2 pwnautomator -
+The script reads the current uploaded binary from:
+
+```text
+mcps/test/.pwnautomator/current_binary
 ```
 
-If a matching challenge container is already running, the pipeline reuses it and skips Docker build/container start. Matching is based on the current run container name, `pwnautomator.runId` label, or the current run image tag.
+You can also pass a binary path explicitly:
 
-Raw fine-tuning traces are written as JSONL:
+```bash
+./run_ghidra_server.sh ./test/chall
+```
+
+## Dataset Output
+
+The raw fine-tuning trace is written as JSONL:
+
 ```text
 pwnable-dashboard/data/storage/now/trace/codex_raw_trace.jsonl
 datasets/raw/<runId>.jsonl
 ```
 
-The trace records Codex-visible output, Codex JSON events, MCP tool calls, and MCP tool responses in append order. Hidden model reasoning is not available unless Codex emits it as visible text or a reasoning summary.
+Clicking `Save Dataset` writes:
 
-Clicking `Save Dataset` writes a package zip:
 ```text
-datasets/packages/<runId>.zip
+datasets/packages/DataSet<number>_<problemName>.zip
+pwnable-dashboard/data/storage/now/dataset/dataset_package.zip
 ```
 
-The package includes the original uploaded files, `challenge_workspace.zip`, exploit Python artifacts when present, `codex_raw_trace.jsonl`, `codex_raw_trace.json`, and metadata.
+The package includes:
 
-Before Codex starts, the dashboard writes `$CODEX_HOME/pwnautomator.config.toml` so Codex can use the repo MCP wrapper:
-```text
-mcps/ghidra_tools/wrapper.py
-```
+- original uploaded files under `uploads/`
+- `challenge_workspace.zip`
+- exploit artifacts when present
+- `raw/codex_raw_trace.jsonl`
+- `codex/manifest.json`
+- `codex/codex_task.md`
 
-The prompt instructs Codex to use MCP tools only for binary analysis, debugging, runtime inspection, and exploit trials. Start MCP services yourself before `Run Pipeline`; the dashboard does not start them.
+`dataset_draft.json` is not generated.
 
-The current prompt is intentionally minimal:
-```text
-pwnable 문제를 풀어라
-```
+## Environment Variables
 
-System prompting is file-first. Edit `guidline_docs/codex-system-prompt.md`, or override it with:
+Common dashboard and Codex settings:
+
 ```bash
-CODEX_SYSTEM_PROMPT_FILE=path/to/system-prompt.md
+HOST=0.0.0.0
+PORT=3000
+CODEX_AGENT_AUTORUN=true
+CODEX_AGENT_COMMAND=codex
+CODEX_AGENT_MODEL=gpt-5.3-codex
+CODEX_AGENT_ARGS="exec --json -m gpt-5.3-codex --profile-v2 pwnautomator -"
+CODEX_AGENT_JSON_TRACE=true
+CODEX_SYSTEM_PROMPT_FILE=guidline_docs/codex-system-prompt.md
+CODEX_PROMPT_MAX_BYTES=262144
+PWN_AUTOMATOR_TRACE_ENABLED=true
+PWN_AUTOMATOR_CHALLENGE_DIR=mcps/test
+UPLOAD_LIMIT_BYTES=209715200
 ```
 
-Short one-off overrides are also supported:
+Codex MCP profile settings:
+
 ```bash
-CODEX_SYSTEM_PROMPT="system instructions"
-CODEX_USER_PROMPT="pwnable 문제를 풀어라"
+CODEX_MCP_AUTOCONFIG=true
+CODEX_MCP_PROFILE=pwnautomator
+CODEX_MCP_SERVER_NAME=pwnautomator
+CODEX_MCP_WRAPPER=mcps/ghidra_tools/wrapper.py
 ```
 
-## How to run
-1. You must have `gdb-peda`
- 
-2. `pip install fastmcp pwntools`
+MCP endpoint overrides:
 
-3. Download ghidra and unzip folder in `mcps` directory (FYI : https://dokhakdubini.tistory.com/564)
-    - `https://github.com/NationalSecurityAgency/ghidra/releases`
-
-4. Add this in mcp config file
-```json
-    "ghidra-mcp": {
-      "command": "[python Directory]",
-      "args": [
-        "[wrapper.py Directory]"
-      ],
-      "env": {
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "GHIDRA_HOST": "[HOST IP]",
-        "GHIDRA_PORT": "9999",
-        "GHIDRA_MCP_DEBUG_HOST": "[HOST IP]",
-        "GHIDRA_MCP_DEBUG_PORT": "19090"
-      }
-    }
-```
-- These files have to run in Ubuntu, so HOST IP will be your wsl or ubuntu ip.
-
-5. Upload the challenge from the dashboard. The dashboard writes the active challenge workspace to `mcps/test`.
-
-6. Fast run
 ```bash
-./run_ghidra_server.sh
+GHIDRA_HOST=127.0.0.1
+GHIDRA_PORT=9999
+GHIDRA_MCP_DEBUG_HOST=127.0.0.1
+GHIDRA_MCP_DEBUG_PORT=19090
+GHIDRA_MCP_PWN_HOST=127.0.0.1
+GHIDRA_MCP_PWN_PORT=19191
 ```
-  - if some files exists in `mcps/challenge`, delete them all
 
-7. Individual exec
-If you have to run these files individually for some reason, use these.
-- Static Debugging : use 9999 port
+## Runtime Notes
+
+If a matching challenge container is already running, the pipeline reuses it and skips Docker build/container start.
+
+Container matching uses:
+
+- current container ID
+- current container name
+- `pwnautomator.runId` Docker label
+- current image tag
+
+## Stop Services
+
+Dashboard in the foreground:
+
 ```bash
-./ghidra_12.0.2_PUBLIC/support/analyzeHeadless challenge test \
-  -process chall \
-  -scriptPath ./ghidra_tools/server \
-  -postScript ghidra_server.py
+Ctrl+C
 ```
 
-- Dynamic Debugging : use 19090 port
+Dashboard started in tmux:
+
 ```bash
-python3 debug_bridge/server.py --host 0.0.0.0 --port 19090
+tmux kill-session -t pwnautomator-web
 ```
 
-8. Close Server
-- Just `Ctrl + C`. run_ghidra_server.sh will clear backup files and cache folders.
+MCP server script in the foreground:
+
+```bash
+Ctrl+C
+```
+
+MCP server started in tmux:
+
+```bash
+tmux kill-session -t pwnautomator-mcp
+```
+
+## Troubleshooting
+
+Check dashboard port:
+
+```bash
+ss -ltnp | grep ':3000'
+```
+
+Check MCP ports:
+
+```bash
+ss -ltnp | grep -E ':(9999|19090|19191)'
+```
+
+If Codex reports a missing Linux optional dependency, reinstall it inside WSL:
+
+```bash
+npm install -g @openai/codex@latest --include=optional
+```
+
+If Codex login refresh fails, log out and sign in again inside WSL:
+
+```bash
+codex logout
+codex login
+codex login status
+```

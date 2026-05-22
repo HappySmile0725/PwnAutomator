@@ -95,30 +95,29 @@ const formatMcpServers = (servers) => servers.map((server) => {
 const buildPromptVariables = ({ state, manifest, manifestPath }) => ({
     runId: state.runId || '',
     manifestPath,
-    challengeDir: manifest.mcpWorkspace.challengeDir,
-    solutionDir: manifest.expectedOutputs.solutionDir,
-    exploitPath: manifest.expectedOutputs.exploitPath,
-    writeupPath: manifest.expectedOutputs.writeupPath,
-    notesPath: manifest.expectedOutputs.notesPath,
-    containerName: state.docker?.containerName || '',
-    containerId: state.docker?.containerId || '',
-    targetBinaryPath: state.challenge?.mcpWorkspace?.targetBinaryPath || ''
+    challengeDir: manifest.challenge.dir,
+    solutionDir: manifest.solution.solutionDir,
+    exploitPath: manifest.solution.exploitPath,
+    writeupPath: manifest.solution.writeupPath,
+    notesPath: manifest.solution.notesPath,
+    containerName: manifest.container.name,
+    containerId: manifest.container.id,
+    targetBinaryPath: manifest.challenge.targetBinaryPath
 });
 
 const buildRuntimeContext = ({ state, manifest, manifestPath, mcpServers }) => [
     '# Runtime Context',
     `- Run ID: ${compactValue(state.runId)}`,
-    `- Challenge directory: ${manifest.mcpWorkspace.challengeDir}`,
-    `- Challenge metadata: ${manifest.mcpWorkspace.metadataDir}`,
     `- Manifest: ${manifestPath}`,
-    `- Current binary marker: ${manifest.mcpWorkspace.currentBinaryPathFile}`,
-    `- Target binary: ${compactValue(state.challenge?.mcpWorkspace?.targetBinaryPath)}`,
-    `- Container name: ${compactValue(state.docker?.containerName)}`,
-    `- Container ID: ${compactValue(state.docker?.containerId)}`,
-    `- Solution directory: ${manifest.expectedOutputs.solutionDir}`,
-    `- Exploit path: ${manifest.expectedOutputs.exploitPath}`,
-    `- Writeup path: ${manifest.expectedOutputs.writeupPath}`,
-    `- Notes path: ${manifest.expectedOutputs.notesPath}`,
+    `- Challenge directory: ${manifest.challenge.dir}`,
+    `- Current binary marker: ${manifest.challenge.currentBinaryMarker}`,
+    `- Target binary: ${compactValue(manifest.challenge.targetBinaryPath)}`,
+    `- Container name: ${compactValue(manifest.container.name)}`,
+    `- Container ID: ${compactValue(manifest.container.id)}`,
+    `- Solution directory: ${manifest.solution.solutionDir}`,
+    `- Exploit path: ${manifest.solution.exploitPath}`,
+    `- Writeup path: ${manifest.solution.writeupPath}`,
+    `- Notes path: ${manifest.solution.notesPath}`,
     '',
     '# MCP Servers',
     formatMcpServers(mcpServers),
@@ -130,8 +129,7 @@ const buildRuntimeContext = ({ state, manifest, manifestPath, mcpServers }) => [
     '- Do not use shell commands or local CLI tools such as file, checksec, readelf, objdump, gdb, python scripts, or direct process execution for analysis.',
     '- If MCP tools are unavailable or return errors, stop and report the MCP blocker instead of falling back to non-MCP analysis.',
     '- Shell usage is only acceptable for saving final artifacts to the requested output paths when an MCP tool cannot write that artifact.',
-    '- MCP servers are external; do not start them from this task.',
-    '- Dataset schema is pending; focus on exploit and evidence artifacts.'
+    '- MCP servers are external; do not start them from this task.'
 ].join('\n');
 
 const buildCodexPrompt = async ({ state, manifest, manifestPath, mcpServers }) => {

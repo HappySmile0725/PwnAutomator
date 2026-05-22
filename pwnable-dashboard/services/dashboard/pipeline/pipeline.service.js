@@ -4,7 +4,7 @@ const paths = require('./paths');
 const dockerService = require('./docker.service');
 const { runCodexAgent } = require('./codexAgent.service');
 const { inspectRuntime } = require('./runtimeInspect.service');
-const { saveDatasetDraft } = require('./dataset.service');
+const { saveDatasetPackage } = require('./dataset.service');
 const { tracePathsForRun } = require('./trace.service');
 const {
     appendLog,
@@ -19,6 +19,13 @@ const {
 
 let activePipeline = null;
 let activeAbortController = null;
+
+const patchState = (mutator) => updateState((state) => {
+    mutator(state);
+    return state;
+});
+
+const withPipeline = (payload) => ({ ...payload, pipeline: getPipelineView() });
 
 const getPipelineView = () => {
     const pipeline = getBasePipelineView();
@@ -66,6 +73,7 @@ const buildRunDockerNames = (runId) => {
 };
 
 const containerNameFromInfo = (info) => String(info?.Name || '').replace(/^\//, '');
+const currentContainerRef = (state) => state.docker?.containerId || state.docker?.containerName;
 
 const ensureUploadedChallenge = (state) => {
     if (!state.challenge?.contextDir) {
@@ -92,7 +100,7 @@ const applyExistingContainer = async (state) => {
 
     const containerName = containerNameFromInfo(info) || dockerState.containerName || names.containerName;
     const imageTag = info.Config?.Image || dockerState.imageTag || names.imageTag;
-    updateState((current) => {
+    patchState((current) => {
         current.docker = {
             ...(current.docker || {}),
             imageTag,
@@ -104,7 +112,6 @@ const applyExistingContainer = async (state) => {
             reusedAt: new Date().toISOString(),
             startedAt: info.State?.StartedAt || current.docker?.startedAt || null
         };
-        return current;
     });
     setStageStatus('docker_build', 'skipped', 'Existing running container detected');
     setStageStatus('container_start', 'success', 'Existing container reused');
@@ -129,7 +136,7 @@ const runDockerBuild = async (state) => {
         logger.flush();
     }
 
-    updateState((current) => {
+    patchState((current) => {
         current.docker = {
             ...(current.docker || {}),
             imageTag: names.imageTag,
@@ -138,7 +145,6 @@ const runDockerBuild = async (state) => {
             dockerfilePath: state.challenge.dockerfilePath,
             builtAt: new Date().toISOString()
         };
-        return current;
     });
     setStageStatus('docker_build', 'success', 'Docker image built');
     appendLog('info', 'Docker build completed.');
@@ -153,13 +159,12 @@ const runContainerStart = async () => {
         runId: state.runId
     });
 
-    updateState((current) => {
+    patchState((current) => {
         current.docker = {
             ...(current.docker || {}),
             containerId: container.id,
             startedAt: new Date().toISOString()
         };
-        return current;
     });
     setStageStatus('container_start', 'success', 'Container started');
     appendLog('info', `Container started: ${state.docker.containerName}`);
@@ -168,10 +173,9 @@ const runContainerStart = async () => {
 const runRuntimeInspection = async () => {
     const state = readState();
     setStageStatus('inspect_runtime', 'running', 'Inspecting running container');
-    const runtime = await inspectRuntime(state.docker.containerId || state.docker.containerName);
-    updateState((current) => {
+    const runtime = await inspectRuntime(currentContainerRef(state));
+    patchState((current) => {
         current.runtime = runtime;
-        return current;
     });
     setStageStatus('inspect_runtime', 'success', 'Runtime inspected');
 
@@ -186,9 +190,8 @@ const runRuntimeInspection = async () => {
 const runCodexStage = async (signal) => {
     setStageStatus('codex_agent', 'running', 'Preparing Codex agent task');
     const result = await runCodexAgent(readState(), { signal });
-    updateState((current) => {
+    patchState((current) => {
         current.codex = result;
-        return current;
     });
 
     if (result.status === 'canceled') {
@@ -208,16 +211,15 @@ const runCodexStage = async (signal) => {
 };
 
 const runDatasetSaveStage = async () => {
-    setStageStatus('dataset_save', 'running', 'Saving dataset draft');
-    const result = await saveDatasetDraft(readState());
-    updateState((current) => {
+    setStageStatus('dataset_save', 'running', 'Saving dataset package');
+    const result = await saveDatasetPackage(readState());
+    patchState((current) => {
         current.dataset = result;
-        return current;
     });
 
-    setStageStatus('dataset_save', 'waiting', 'Dataset draft saved; schema pending');
-    setRunStatus('waiting_for_dataset_schema', 'dataset_save');
-    appendLog('info', `Dataset package saved: ${path.relative(paths.repoRoot, result.packagePath || result.filePath)}`);
+    setStageStatus('dataset_save', 'success', 'Dataset package saved');
+    setRunStatus('success', 'dataset_save');
+    appendLog('info', `Dataset package saved: ${path.relative(paths.repoRoot, result.packagePath)}`);
     return result;
 };
 
@@ -243,8 +245,9 @@ const executePipeline = async (signal) => {
     } catch (error) {
         if (signal?.aborted) {
             appendLog('warn', 'Pipeline canceled by user.');
-            setStageStatus(readState().currentStage || 'codex_agent', 'canceled', 'Canceled by user');
-            setRunStatus('canceled', readState().currentStage || 'codex_agent');
+            const stage = readState().currentStage || 'codex_agent';
+            setStageStatus(stage, 'canceled', 'Canceled by user');
+            setRunStatus('canceled', stage);
             return;
         }
         appendLog('error', error.message || 'Pipeline failed.');
@@ -254,13 +257,13 @@ const executePipeline = async (signal) => {
 
 const startPipeline = async () => {
     if (activePipeline) {
-        return { success: true, running: true, pipeline: getPipelineView() };
+        return withPipeline({ success: true, running: true });
     }
 
     try {
         ensureUploadedChallenge(readState());
     } catch (error) {
-        return { success: false, error: error.message, pipeline: getPipelineView() };
+        return withPipeline({ success: false, error: error.message });
     }
 
     activeAbortController = new AbortController();
@@ -269,45 +272,44 @@ const startPipeline = async () => {
         activeAbortController = null;
     });
 
-    return { success: true, running: true, pipeline: getPipelineView() };
+    return withPipeline({ success: true, running: true });
 };
 
 const cancelActivePipeline = async () => {
     if (!activePipeline || !activeAbortController) {
-        return { success: false, error: 'No running LLM to cancel.', pipeline: getPipelineView() };
+        return withPipeline({ success: false, error: 'No running LLM to cancel.' });
     }
 
     const state = readState();
     if (state.currentStage !== 'codex_agent') {
-        return { success: false, error: 'Codex agent is not running yet.', pipeline: getPipelineView() };
+        return withPipeline({ success: false, error: 'Codex agent is not running yet.' });
     }
 
     appendLog('warn', 'Cancel requested by user.');
     activeAbortController.abort();
     setStageStatus('codex_agent', 'canceled', 'Cancel requested');
     setRunStatus('canceled', 'codex_agent');
-    return { success: true, canceled: true, pipeline: getPipelineView() };
+    return withPipeline({ success: true, canceled: true });
 };
 
-const saveCurrentDatasetDraft = async () => {
+const saveCurrentDatasetPackage = async () => {
     if (activePipeline) {
-        return { success: false, error: 'Pipeline is still running.', pipeline: getPipelineView() };
+        return withPipeline({ success: false, error: 'Pipeline is still running.' });
     }
 
     try {
         const result = await runDatasetSaveStage();
-        return { success: true, dataset: result, pipeline: getPipelineView() };
+        return withPipeline({ success: true, dataset: result });
     } catch (error) {
-        appendLog('error', error.message || 'Dataset draft save failed.');
+        appendLog('error', error.message || 'Dataset package save failed.');
         failCurrentStage(error);
-        return { success: false, error: error.message, pipeline: getPipelineView() };
+        return withPipeline({ success: false, error: error.message });
     }
 };
 
 const getPipelineStatus = async () => {
     const pipeline = getPipelineView();
-    const containerRef = pipeline.docker?.containerId || pipeline.docker?.containerName;
-    const containerRunning = await dockerService.isContainerRunning(containerRef);
+    const containerRunning = await dockerService.isContainerRunning(currentContainerRef(pipeline));
 
     return {
         ...pipeline,
@@ -321,6 +323,6 @@ module.exports = {
     cancelActivePipeline,
     getPipelineStatus,
     getPipelineView,
-    saveCurrentDatasetDraft,
+    saveCurrentDatasetPackage,
     startPipeline
 };

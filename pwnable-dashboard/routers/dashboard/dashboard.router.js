@@ -11,6 +11,6 @@ router.get('/dashboard/ai', checkLogin, dashboardController.showAi);
 router.get('/dashboard/ai/status', checkLogin, dashboardController.aiStatus);
 router.post('/dashboard/ai/run', checkLogin, dashboardController.runPipeline);
 router.post('/dashboard/ai/cancel', checkLogin, dashboardController.cancelPipeline);
-router.post('/dashboard/ai/dataset', checkLogin, dashboardController.saveDatasetDraft);
+router.post('/dashboard/ai/dataset', checkLogin, dashboardController.saveDatasetPackage);
 
 module.exports = router;

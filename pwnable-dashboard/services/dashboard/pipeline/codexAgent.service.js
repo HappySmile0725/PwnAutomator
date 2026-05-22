@@ -52,43 +52,46 @@ const writeJson = async (filePath, payload) => {
     await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
 };
 
-const buildManifest = (state) => ({
-    version: 1,
-    runId: state.runId,
-    createdAt: new Date().toISOString(),
-    challenge: state.challenge,
-    docker: state.docker,
-    runtime: state.runtime,
-    mcpServers,
-    mcpWorkspace: {
-        challengeDir: paths.challengeDir,
-        metadataDir: paths.challengeMetaDir,
-        manifestPath: path.join(paths.challengeMetaDir, 'manifest.json'),
-        currentBinaryPathFile: path.join(paths.challengeMetaDir, 'current_binary'),
-        payloadPath: path.join(paths.challengeDir, 'hack.py')
-    },
-    rawTrace: {
-        currentTracePath: tracePathsForRun(state.runId).currentTracePath,
-        rawDatasetPath: tracePathsForRun(state.runId).rawDatasetPath,
-        schema: 'pwnautomator.raw_trace.v1'
-    },
-    expectedOutputs: {
-        solutionDir: paths.solutionDir,
-        exploitPath: path.join(paths.solutionDir, 'exploit.py'),
-        writeupPath: path.join(paths.solutionDir, 'writeup.md'),
-        notesPath: path.join(paths.solutionDir, 'notes.md')
-    },
-    constraints: {
-        startMcpServers: false,
-        datasetSchema: 'pending'
-    }
-});
+const buildCodexManifest = (state) => {
+    const tracePaths = tracePathsForRun(state.runId);
+    return {
+        version: 1,
+        runId: state.runId,
+        createdAt: new Date().toISOString(),
+        challenge: {
+            dir: paths.challengeDir,
+            contextDir: state.challenge?.contextDir || paths.challengeDir,
+            targetBinaryPath: state.challenge?.mcpWorkspace?.targetBinaryPath || '',
+            trackingFiles: state.challenge?.trackingFiles || [],
+            currentBinaryMarker: path.join(paths.challengeMetaDir, 'current_binary')
+        },
+        container: {
+            name: state.docker?.containerName || '',
+            id: state.docker?.containerId || '',
+            ports: state.runtime?.network?.ports || []
+        },
+        solution: {
+            solutionDir: paths.solutionDir,
+            exploitPath: path.join(paths.solutionDir, 'exploit.py'),
+            writeupPath: path.join(paths.solutionDir, 'writeup.md'),
+            notesPath: path.join(paths.solutionDir, 'notes.md')
+        },
+        mcpServers: mcpServers.map((server) => ({
+            name: server.name,
+            endpoint: server.endpoint,
+            tools: server.tools
+        })),
+        trace: {
+            jsonlPath: tracePaths.currentTracePath
+        }
+    };
+};
 
 const prepareCodexTask = async (state) => {
     await fs.mkdir(paths.codexDir, { recursive: true });
     await fs.mkdir(paths.solutionDir, { recursive: true });
 
-    const manifest = buildManifest(state);
+    const manifest = buildCodexManifest(state);
     const manifestPath = path.join(paths.codexDir, 'manifest.json');
     const promptPath = path.join(paths.codexDir, 'codex_task.md');
 
@@ -322,7 +325,6 @@ const runCodexAgent = async (state, options = {}) => {
             cwd: state.challenge?.contextDir || paths.challengeDir,
             env: {
                 PWN_AUTOMATOR_RUN_ID: state.runId || '',
-                PWN_AUTOMATOR_MANIFEST: prepared.manifestPath,
                 PWN_AUTOMATOR_PROMPT: prepared.promptPath,
                 PWN_AUTOMATOR_SOLUTION_DIR: paths.solutionDir,
                 PWN_AUTOMATOR_CONTAINER: state.docker?.containerName || '',
@@ -414,6 +416,7 @@ const runCodexAgent = async (state, options = {}) => {
 };
 
 module.exports = {
+    buildCodexManifest,
     mcpServers,
     prepareCodexTask,
     runCodexAgent
