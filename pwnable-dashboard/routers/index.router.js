@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const indexController = require('../controllers/index.controller');
 
-router.get('/', function(req, res) {
-  res.redirect('/dashboard');
-});
+router.get('/', indexController.redirectToDashboard);
 
 module.exports = router;

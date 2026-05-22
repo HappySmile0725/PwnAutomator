@@ -21,7 +21,11 @@ app.set('view engine', 'ejs');
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use(fileUpload());
+app.use(fileUpload({
+  limits: { fileSize: Number(process.env.UPLOAD_LIMIT_BYTES) || 200 * 1024 * 1024 },
+  abortOnLimit: true,
+  createParentPath: true
+}));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from typing import Any, Dict, List
 
@@ -30,6 +31,7 @@ DEFAULT_PORT = 9999
 DEFAULT_PWN_HOST = "127.0.0.1"
 DEFAULT_PWN_PORT = 19191
 DEFAULT_PWN_TIMEOUT = 10.0
+TRACE_SCHEMA = "pwnautomator.raw_trace.v1"
 
 
 def _tool(
@@ -391,7 +393,7 @@ TOOLS: List[Dict[str, Any]] = [
             "source": {
                 "type": "string",
                 "enum": ["local", "system"],
-                "description": "Optional libc source selection: `local` uses mcps/test/libc.so.6, `system` uses /usr/lib/x86_64-linux-gnu/libc.so.6.",
+                "description": "Optional libc source selection: `local` uses the active challenge workspace libc, `system` uses /usr/lib/x86_64-linux-gnu/libc.so.6.",
             },
             "timeout_ms": {
                 "type": "integer",
@@ -431,22 +433,22 @@ TOOLS: List[Dict[str, Any]] = [
     ),
     _tool(
         "pwn_payload_read",
-        "Read fixed payload script mcps/test/hack.py and parsed payload body.",
+        "Read active challenge workspace hack.py and parsed payload body.",
         properties={
             "path": {
                 "type": "string",
-                "description": "Optional. Only mcps/test/hack.py is accepted.",
+                "description": "Optional. Only active challenge workspace hack.py is accepted.",
             }
         },
     ),
-    _tool("pwn_payload_list", "List fixed payload script in mcps/test."),
+    _tool("pwn_payload_list", "List payload scripts in active challenge workspace."),
     _tool(
         "pwn_payload_execute",
-        "Execute fixed payload mcps/test/hack.py against fixed target mcps/test/chall.",
+        "Execute active challenge workspace hack.py against the current target binary.",
         properties={
             "path": {
                 "type": "string",
-                "description": "Optional. Only mcps/test/hack.py is accepted.",
+                "description": "Optional. Only active challenge workspace hack.py is accepted.",
             },
             "pause_before_payload": {"type": "boolean", "default": False},
             "wait_ms": {
@@ -600,6 +602,37 @@ def _normalize_tool_args(arguments: Any) -> Dict[str, Any]:
     return {}
 
 
+def _trace_enabled() -> bool:
+    value = os.environ.get("PWN_AUTOMATOR_TRACE_ENABLED", "true").strip().lower()
+    return value not in ("0", "false", "no", "off")
+
+
+def _trace_file() -> str:
+    return os.environ.get("PWN_AUTOMATOR_TRACE_FILE", "").strip()
+
+
+def _trace_event(event: Dict[str, Any]) -> None:
+    trace_file = _trace_file()
+    if not _trace_enabled() or not trace_file:
+        return
+
+    try:
+        os.makedirs(os.path.dirname(trace_file), exist_ok=True)
+        payload = {
+            "schema": TRACE_SCHEMA,
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + (".%03dZ" % int((time.time() % 1) * 1000)),
+            "monotonic_ns": time.monotonic_ns(),
+            "pid": os.getpid(),
+            "runId": os.environ.get("PWN_AUTOMATOR_TRACE_RUN_ID", ""),
+            "source": "mcp_wrapper",
+            **event,
+        }
+        with open(trace_file, "a", encoding="utf-8") as fp:
+            fp.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        return
+
+
 class MCPServer:
     def __init__(
         self,
@@ -740,6 +773,11 @@ class MCPServer:
                 return
 
             if method == "tools/list":
+                _trace_event({
+                    "type": "mcp_tools_list",
+                    "requestId": req_id,
+                    "data": {"toolCount": len(TOOLS)},
+                })
                 if req_id is not None:
                     self._send_result(req_id, {"tools": TOOLS})
                 return
@@ -747,7 +785,22 @@ class MCPServer:
             if method == "tools/call":
                 name = params.get("name")
                 args = _normalize_tool_args(params.get("arguments"))
+                started_ns = time.monotonic_ns()
+                _trace_event({
+                    "type": "mcp_tool_call",
+                    "requestId": req_id,
+                    "tool": name,
+                    "arguments": args,
+                })
                 result = self._call_tool(name, args)
+                _trace_event({
+                    "type": "mcp_tool_response",
+                    "requestId": req_id,
+                    "tool": name,
+                    "durationMs": round((time.monotonic_ns() - started_ns) / 1_000_000, 3),
+                    "isError": bool(result.get("isError")),
+                    "response": result,
+                })
                 if req_id is not None:
                     self._send_result(req_id, result)
                 return
@@ -757,6 +810,13 @@ class MCPServer:
         except Exception as exc:
             if req_id is None:
                 return
+            _trace_event({
+                "type": "mcp_request_error",
+                "requestId": req_id,
+                "method": method,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            })
             self._send_error(
                 req_id,
                 -32000,

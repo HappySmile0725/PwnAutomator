@@ -15,7 +15,16 @@ LIBC_SOURCE_CHOICES = (SOURCE_LOCAL, SOURCE_SYSTEM)
 
 HANDLERS_DIR = os.path.dirname(os.path.abspath(__file__))
 MCPS_DIR = os.path.normpath(os.path.join(HANDLERS_DIR, "..", "..", ".."))
-LOCAL_LIBC_DIRS = (os.path.join(MCPS_DIR, "test"),)
+PROJECT_ROOT = os.path.abspath(os.path.join(MCPS_DIR, ".."))
+_CONFIGURED_CHALLENGE_DIR = os.environ.get("PWN_AUTOMATOR_CHALLENGE_DIR") or os.environ.get("PWNTOOLS_MCP_CHALLENGE_DIR")
+if _CONFIGURED_CHALLENGE_DIR:
+    if os.path.isabs(_CONFIGURED_CHALLENGE_DIR):
+        _ACTIVE_CHALLENGE_DIR = os.path.abspath(_CONFIGURED_CHALLENGE_DIR)
+    else:
+        _ACTIVE_CHALLENGE_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, _CONFIGURED_CHALLENGE_DIR))
+else:
+    _ACTIVE_CHALLENGE_DIR = os.path.join(MCPS_DIR, "test")
+LOCAL_LIBC_DIRS = (_ACTIVE_CHALLENGE_DIR,)
 
 
 def _normalize_timeout_ms(value, default_value):
@@ -175,7 +184,7 @@ class GadgetHandler(GdbHandler):
         if source == SOURCE_LOCAL:
             local_path = _find_local_libc_path()
             if not local_path:
-                return "", "", "local libc not found under mcps/test"
+                return "", "", "local libc not found under active challenge workspace"
             return local_path, SOURCE_LOCAL, ""
         if source == SOURCE_SYSTEM:
             path = _normalize_path(DEFAULT_LIBC_PATH)

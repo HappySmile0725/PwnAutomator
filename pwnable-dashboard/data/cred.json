@@ -2,5 +2,9 @@
   {
     "id": "asdf",
     "password": "$2b$10$Sn8MhXT7IARxHJnY3eb.C.2It57y48gTTLOymDJf621XKmbsAPhPm"
+  },
+  {
+    "id": "qwer",
+    "password": "$2b$10$N3AcfRO3VnbnIvg37hIe0.6rtm.j8yEhJ9FpFpqqN1ybtyLmg4pUW"
   }
 ]

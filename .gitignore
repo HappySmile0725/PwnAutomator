@@ -2,4 +2,9 @@
 /pwnable-dashboard/.env
 /pwnable-dashboard/data/*
 /mcps/ghidra_12.0.2_PUBLIC
+/mcps/challenge/*
 /mcps/challenges/*
+/mcps/test/*
+__pycache__/
+*.py[cod]
+*.class

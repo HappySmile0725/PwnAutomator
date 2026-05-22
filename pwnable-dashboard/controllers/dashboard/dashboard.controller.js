@@ -1,16 +1,35 @@
-const express = require('express');
-const router = express.Router();
-
 const dashboardService = require('../../services/dashboard/dashboard.service');
-const getaiDataService = require('../../services/dashboard/ais/getaiData.service');
-const trackService = require('../../services/dashboard/ais/track.service');
-const uploadService = require('../../services/dashboard/upload.service');
-const runService = require('../../services/dashboard/building/run.service');
+const hardwareService = require('../../services/dashboard/hardware.service');
+const { handleChallengeUpload } = require('../../services/dashboard/pipeline/challengeUpload.service');
+const pipelineService = require('../../services/dashboard/pipeline/pipeline.service');
 
-router.get('/', async (req, res) => {
+const wantsJson = (req) => {
+    const accept = req.get('accept') || '';
+    return req.xhr || accept.includes('application/json');
+};
+
+const renderAi = (res, statusCode = 200) => {
+    const pipeline = pipelineService.getPipelineView();
+    return res.status(statusCode).render('dashboard/ai', {
+        title: 'AI Dashboard',
+        ai: pipeline,
+        status: pipeline,
+        pipeline
+    });
+};
+
+const sendPipelineResponse = (req, res, result, statusCode = 200) => {
+    const pipeline = pipelineService.getPipelineView();
+    if (wantsJson(req)) {
+        return res.status(statusCode).json({ ...result, pipeline, ai: pipeline, status: pipeline });
+    }
+    return renderAi(res, statusCode);
+};
+
+const showDashboard = async (req, res) => {
     try {
         const dashboardData = await dashboardService.getDashboardData();
-        const aiData = await getaiDataService.getAIData();
+        const aiData = await pipelineService.getPipelineStatus();
 
         if (!dashboardData) {
             throw new Error('Unable to load dashboard data.');
@@ -28,92 +47,97 @@ router.get('/', async (req, res) => {
             error: 'Unable to load dashboard data.'
         });
     }
-});
+};
 
-router.post('/upload', async (req, res) => {
+const hardwareStatus = async (req, res) => {
     try {
-        const result = await uploadService.handleFileUpload(req);
+        return res.status(200).json(await hardwareService.getHardwareStatus());
+    } catch (error) {
+        return res.status(500).json({ error: 'Unable to load hardware status.' });
+    }
+};
+
+const uploadChallenge = async (req, res) => {
+    try {
+        const result = await handleChallengeUpload(req);
         if (result.success) {
-            return res.status(200).render('dashboard/ai', {
-                title: 'AI Dashboard',
-                ai: result.ai,
-                status: result.status
-            });
-        } else {
-            return res.status(400).render('dashboard/error', {
-                title: 'Upload Error',
-                error: result.error || 'File upload failed.'
-            });
+            return sendPipelineResponse(req, res, result);
         }
+
+        if (wantsJson(req)) {
+            return res.status(400).json(result);
+        }
+        return res.status(400).render('dashboard/error', {
+            title: 'Upload Error',
+            error: result.error || 'File upload failed.'
+        });
     } catch (error) {
         console.error('Upload Error:', error);
+        if (wantsJson(req)) {
+            return res.status(500).json({ success: false, error: 'Internal server error during upload.' });
+        }
         return res.status(500).render('dashboard/error', {
             title: 'Upload Error',
             error: 'Internal server error during upload.'
         });
     }
-});
+};
 
-router.get('/ai', async (req, res) => {
+const showAi = async (req, res) => renderAi(res);
+
+const aiStatus = async (req, res) => {
     try {
-        const track = await trackService.getTrackData();
-        const getaiData = await getaiDataService.getAIData();
-
-        if (!track) {
-            throw new Error('Unable to load AI dashboard data.');
-        }
-
-        return res.status(200).render('dashboard/ai', {
-            title: 'AI Dashboard',
-            ai: track,
-            status: getaiData
-        });
-    } catch (error) {
-        console.error('AI Dashboard Error:', error);
-        return res.status(500).render('dashboard/error', {
-            title: 'AI Dashboard Error',
-            error: 'Unable to load AI dashboard data.'
-        });
-    }
-});
-
-router.get('/ai/status', async (req, res) => {
-    try {
-        const track = await trackService.getTrackData();
-        const getaiData = await getaiDataService.getAIData();
-        return res.status(200).json({
-            ai: track,
-            status: getaiData
-        });
+        const pipeline = pipelineService.getPipelineView();
+        return res.status(200).json({ ai: pipeline, status: pipeline, pipeline });
     } catch (error) {
         console.error('AI Status Error:', error);
-        return res.status(500).json({ error: 'Failed to fetch AI status.' });
+        return res.status(500).json({ error: 'Failed to fetch pipeline status.' });
     }
-});
+};
 
-router.post('/ai/run', async (req, res) => {
+const runPipeline = async (req, res) => {
     try {
-        const result = await runService.buildProcess();
-
-        if (result.success) {
-            return res.status(200).render('dashboard/ai', {
-                title: 'AI Dashboard',
-                ai: result.ai,
-                status: result.status
-            });
-        } else {
-            return res.status(500).render('dashboard/error', {
-                title: 'AI Run Error',
-                error: result.error || 'Failed to run AI process.'
-            });
-        }
+        const result = await pipelineService.startPipeline();
+        return sendPipelineResponse(req, res, result, result.success ? 202 : 400);
     } catch (error) {
         console.error('AI Run Error:', error);
+        if (wantsJson(req)) {
+            return res.status(500).json({ success: false, error: 'Internal server error during pipeline run.' });
+        }
         return res.status(500).render('dashboard/error', {
-            title: 'AI Run Error',
-            error: 'Internal server error during AI run.'
+            title: 'Pipeline Error',
+            error: 'Internal server error during pipeline run.'
         });
     }
-});
+};
 
-module.exports = router;
+const cancelPipeline = async (req, res) => {
+    try {
+        const result = await pipelineService.cancelActivePipeline();
+        return sendPipelineResponse(req, res, result, result.success ? 200 : 400);
+    } catch (error) {
+        console.error('AI Cancel Error:', error);
+        return res.status(500).json({ success: false, error: 'Internal server error during pipeline cancel.' });
+    }
+};
+
+const saveDatasetDraft = async (req, res) => {
+    try {
+        const result = await pipelineService.saveCurrentDatasetDraft();
+        return sendPipelineResponse(req, res, result, result.success ? 200 : 400);
+    } catch (error) {
+        console.error('Dataset Save Error:', error);
+        return res.status(500).json({ success: false, error: 'Internal server error during dataset save.' });
+    }
+};
+
+module.exports = {
+    aiStatus,
+    cancelPipeline,
+    hardwareStatus,
+    runPipeline,
+    saveDatasetDraft,
+    showAi,
+    showDashboard,
+    uploadChallenge
+};

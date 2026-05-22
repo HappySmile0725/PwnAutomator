@@ -1,31 +1,31 @@
-const express = require('express');
-const router = express.Router();
+const registerService = require('../../services/auth/register.service');
 
-const register = require('../../services/auth/register.service');
+const showRegister = (req, res) => {
+    res.render('auth/register', { title: 'Register' });
+};
 
-router.get('/register', async(req, res) => {
-    res.render('auth/register');
-});
-
-router.post('/register', async(req, res) => {
+const register = async (req, res) => {
     const { id, pwd } = req.body;
-    if(!id || !pwd) {
+
+    if (!id || !pwd) {
         return res.status(400).render('auth/register', {
             title: 'Register',
             error: 'ID and Password are required.'
         });
     }
 
-    const result = await register(id, pwd);
-
-    if(result.success) {
-        return res.status(201).redirect('/auth/login');
-    } else {
+    const result = await registerService(id, pwd);
+    if (!result.success) {
         return res.status(409).render('auth/register', {
             title: 'Register',
-            error: 'ID already exists.'
+            error: result.message || 'ID already exists.'
         });
     }
-});
 
-module.exports = router;
+    return res.status(201).redirect('/auth/login');
+};
+
+module.exports = {
+    register,
+    showRegister
+};

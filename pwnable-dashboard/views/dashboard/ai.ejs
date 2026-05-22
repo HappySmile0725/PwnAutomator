@@ -5,216 +5,343 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PwnAutomator - AI</title>
     <link rel="stylesheet" href="/dashboard/ai.css">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <%
+        const pipelineData = pipeline || ai || {};
+        const steps = Array.isArray(pipelineData.steps) ? pipelineData.steps : [];
+        const files = Array.isArray(pipelineData.files) ? pipelineData.files : [];
+        const output = Array.isArray(pipelineData.output) ? pipelineData.output : [];
+        const statusText = String(pipelineData.status || 'idle').replace(/_/g, ' ');
+        const runId = pipelineData.runId || '-';
+        const contextDir = pipelineData.challenge?.contextDir || '-';
+        const containerName = pipelineData.docker?.containerName || '-';
+        const promptPath = pipelineData.codex?.promptPath || '-';
+        const datasetPath = pipelineData.dataset?.packagePath || pipelineData.dataset?.filePath || '-';
+    %>
     <div class="bg-grid"></div>
     <div class="dashboard">
         <header class="header">
             <div class="logo">
                 <span class="logo-text">Pwn<span class="accent">Automator</span></span>
             </div>
-            <div class="header-toggle">
+            <nav class="header-toggle" aria-label="Dashboard navigation">
                 <a href="/dashboard" class="toggle-link">Dashboard</a>
                 <a href="/dashboard/ai" class="toggle-link active">AI</a>
                 <span class="toggle-knob"></span>
-            </div>
+            </nav>
         </header>
 
         <main class="main-content">
-            <div class="ai-card">
-                <h2 class="card-title">AI Engine</h2>
-                
-                <div class="ai-info">
-                    <div class="info-row">
-                        <span class="label">Model</span>
-                        <span class="value model-name">Qwen3-Coder-30b</span>
+            <section class="panel flow-panel">
+                <div class="panel-header">
+                    <div>
+                        <p class="eyebrow">Pipeline</p>
+                        <h1 class="panel-title">Challenge to Dataset</h1>
                     </div>
-                    <div class="info-row">
-                        <span class="label">Status</span>
-                        <% 
-                            const currentStatus = status?.status || 'Nothing';
-                            const normalizedStatus = String(currentStatus).toLowerCase();
-                            const isOperating = normalizedStatus === 'operational' || normalizedStatus === 'operating';
-                            const statusClass = isOperating ? 'status-ready' : 'status-idle';
-                            const displayStatus = isOperating ? 'Operating' : currentStatus;
-                        %>
-                        <span class="status-pill <%= statusClass %>" id="ai-status-pill">
-                            <%= displayStatus %>
-                        </span>
+                    <span class="status-pill" id="pipeline-status"><%= statusText %></span>
+                </div>
+
+                <ol class="stage-list" id="stage-list">
+                    <% steps.forEach((step) => { %>
+                        <li class="stage-item <%= step.status %>" data-stage="<%= step.key %>">
+                            <span class="stage-index"><%= Number(step.index) + 1 %></span>
+                            <div class="stage-body">
+                                <span class="stage-name"><%= step.label %></span>
+                                <span class="stage-detail"><%= step.detail || step.status %></span>
+                            </div>
+                            <span class="stage-status"><%= step.status %></span>
+                        </li>
+                    <% }) %>
+                </ol>
+            </section>
+
+            <section class="panel control-panel">
+                <div class="panel-header compact">
+                    <div>
+                        <p class="eyebrow">Control</p>
+                        <h2 class="panel-title">Run Workspace</h2>
                     </div>
                 </div>
+
+                <form action="/dashboard/upload" method="POST" enctype="multipart/form-data" class="upload-form" id="upload-form">
+                    <label class="upload-area" for="challenge-upload">
+                        <input type="file" id="challenge-upload" name="challenge" multiple hidden>
+                        <span class="upload-icon">UP</span>
+                        <span class="upload-title">Upload challenge files or zip</span>
+                        <span class="upload-subtitle" id="upload-file-name">Unified MCP/web challenge workspace</span>
+                    </label>
+                </form>
+
+                <div class="button-row">
+                    <button class="action-button primary" id="run-btn" type="button">
+                        <span class="button-icon">RUN</span>
+                        <span>Start Pipeline</span>
+                    </button>
+                    <button class="action-button danger" id="cancel-btn" type="button" disabled>
+                        <span class="button-icon">STOP</span>
+                        <span>Cancel LLM</span>
+                    </button>
+                    <button class="action-button" id="dataset-btn" type="button">
+                        <span class="button-icon">DS</span>
+                        <span>Save Dataset</span>
+                    </button>
+                </div>
+
+                <dl class="meta-grid">
+                    <div>
+                        <dt>Run ID</dt>
+                        <dd id="run-id"><%= runId %></dd>
+                    </div>
+                    <div>
+                        <dt>Docker Context</dt>
+                        <dd id="context-dir"><%= contextDir %></dd>
+                    </div>
+                    <div>
+                        <dt>Container</dt>
+                        <dd id="container-name"><%= containerName %></dd>
+                    </div>
+                    <div>
+                        <dt>Codex Prompt</dt>
+                        <dd id="prompt-path"><%= promptPath %></dd>
+                    </div>
+                    <div>
+                        <dt>Dataset Package</dt>
+                        <dd id="dataset-path"><%= datasetPath %></dd>
+                    </div>
+                </dl>
 
                 <div class="tracking-section">
                     <h3 class="section-title">Tracking Files</h3>
-                    <div class="file-list">
-                        <% if (ai?.files && ai.files.length > 0) { %>
-                            <% ai.files.forEach(file => { %>
-                                <div class="file-item">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                        <polyline points="14 2 14 8 20 8"/>
-                                    </svg>
-                                    <span class="file-name"><%= file %></span>
-                                </div>
+                    <div class="file-list" id="file-list">
+                        <% if (files.length > 0) { %>
+                            <% files.forEach((file) => { %>
+                                <div class="file-item"><%= file %></div>
                             <% }) %>
                         <% } else { %>
-                            <p class="no-files">No files tracked</p>
+                            <p class="empty-text">No challenge file detected yet.</p>
                         <% } %>
                     </div>
                 </div>
+            </section>
 
-                <div class="action-section">
-                    <form action="/dashboard/upload" method="POST" enctype="multipart/form-data" class="upload-form">
-                        <label class="upload-area" for="file-upload">
-                            <input type="file" id="file-upload" name="file" multiple hidden>
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="17 8 12 3 7 8"/>
-                                <line x1="12" y1="3" x2="12" y2="15"/>
-                            </svg>
-                            <span>Drop files or click to upload</span>
-                        </label>
-                    </form>
-
-                    <button class="run-button" id="run-btn">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="5 3 19 12 5 21 5 3"/>
-                        </svg>
-                        <span>Run Analysis</span>
-                    </button>
+            <section class="panel output-panel">
+                <div class="panel-header compact">
+                    <div>
+                        <p class="eyebrow">Runtime</p>
+                        <h2 class="panel-title">Output</h2>
+                    </div>
                 </div>
-            </div>
-
-            <div class="output-card">
-                <h2 class="card-title">Output</h2>
                 <div class="output-console" id="output-console">
-                    <% if (ai?.output && ai.output.length > 0) { %>
-                        <% ai.output.forEach(line => { %>
+                    <% if (output.length > 0) { %>
+                        <% output.forEach((line) => { %>
                             <div class="console-line"><%= line %></div>
                         <% }) %>
                     <% } else { %>
-                        <div class="console-line dim">Waiting for analysis...</div>
+                        <div class="console-line dim">Waiting for challenge upload...</div>
                     <% } %>
                 </div>
-            </div>
+            </section>
+
         </main>
     </div>
 
+    <script id="initial-pipeline" type="application/json"><%- JSON.stringify(pipelineData).replace(/</g, '\\u003c') %></script>
     <script>
-        const uploadInput = document.getElementById('file-upload');
-        const uploadForm = uploadInput.closest('form');
+        const uploadInput = document.getElementById('challenge-upload');
+        const uploadForm = document.getElementById('upload-form');
+        const uploadFileName = document.getElementById('upload-file-name');
+        const runButton = document.getElementById('run-btn');
+        const cancelButton = document.getElementById('cancel-btn');
+        const datasetButton = document.getElementById('dataset-btn');
+        const statusPill = document.getElementById('pipeline-status');
+        const stageList = document.getElementById('stage-list');
+        const fileList = document.getElementById('file-list');
+        const outputConsole = document.getElementById('output-console');
+        const metaEls = {
+            runId: document.getElementById('run-id'),
+            contextDir: document.getElementById('context-dir'),
+            containerName: document.getElementById('container-name'),
+            promptPath: document.getElementById('prompt-path'),
+            datasetPath: document.getElementById('dataset-path')
+        };
 
-        uploadInput.addEventListener('change', async function() {
-            if (this.files.length === 0) {
+        let lastOutputKey = '';
+
+        const formatStatus = (value) => String(value || 'idle').replace(/_/g, ' ');
+
+        const setBusy = (button, busy) => {
+            button.disabled = busy;
+            button.classList.toggle('busy', busy);
+        };
+
+        const renderStages = (steps) => {
+            stageList.innerHTML = '';
+            if (!Array.isArray(steps) || steps.length === 0) {
                 return;
             }
+            steps.forEach((step) => {
+                const item = document.createElement('li');
+                item.className = `stage-item ${step.status || 'pending'}`;
+                item.dataset.stage = step.key;
 
-            const formData = new FormData(uploadForm);
-            const response = await fetch(uploadForm.action, {
-                method: 'POST',
-                body: formData
+                const index = document.createElement('span');
+                index.className = 'stage-index';
+                index.textContent = Number(step.index) + 1;
+
+                const body = document.createElement('div');
+                body.className = 'stage-body';
+                const name = document.createElement('span');
+                name.className = 'stage-name';
+                name.textContent = step.label;
+                const detail = document.createElement('span');
+                detail.className = 'stage-detail';
+                detail.textContent = step.detail || step.status || 'pending';
+                body.append(name, detail);
+
+                const status = document.createElement('span');
+                status.className = 'stage-status';
+                status.textContent = step.status || 'pending';
+
+                item.append(index, body, status);
+                stageList.appendChild(item);
             });
-            if (response.ok) {
-                alert('Success Upload');
-            }
-        });
+        };
 
-        const runButton = document.getElementById('run-btn');
-        const runButtonDefault = runButton.innerHTML;
-        const outputConsole = document.getElementById('output-console');
-        const statusPill = document.getElementById('ai-status-pill');
-        let lastOutputKey = '';
-        let runInProgress = false;
+        const renderFiles = (files) => {
+            fileList.innerHTML = '';
+            if (!Array.isArray(files) || files.length === 0) {
+                const empty = document.createElement('p');
+                empty.className = 'empty-text';
+                empty.textContent = 'No challenge file detected yet.';
+                fileList.appendChild(empty);
+                return;
+            }
+            files.forEach((file) => {
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.textContent = file;
+                fileList.appendChild(item);
+            });
+        };
 
         const renderOutput = (lines) => {
+            const outputKey = Array.isArray(lines) ? lines.join('\n') : '';
+            if (outputKey === lastOutputKey) {
+                return;
+            }
+            lastOutputKey = outputKey;
             outputConsole.innerHTML = '';
             if (!Array.isArray(lines) || lines.length === 0) {
                 const empty = document.createElement('div');
                 empty.className = 'console-line dim';
-                empty.textContent = 'Waiting for analysis...';
+                empty.textContent = 'Waiting for challenge upload...';
                 outputConsole.appendChild(empty);
                 return;
             }
             lines.forEach((line) => {
                 const item = document.createElement('div');
                 item.className = 'console-line';
-                item.textContent = line;
+                item.textContent = String(line || '')
+                    .replace(/\\r\\n/g, '\n')
+                    .replace(/\\n/g, '\n')
+                    .replace(/\r\n/g, '\n');
                 outputConsole.appendChild(item);
             });
             outputConsole.scrollTop = outputConsole.scrollHeight;
         };
 
-        const setRunButtonState = (isRunning) => {
-            runInProgress = isRunning;
-            if (isRunning) {
-                runButton.disabled = true;
-                runButton.innerHTML = `
-                    <svg class="spinner" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                    </svg>
-                    <span>Running...</span>
-                `;
-                return;
-            }
-            runButton.disabled = false;
-            runButton.innerHTML = runButtonDefault;
+        const renderPipeline = (pipeline) => {
+            const data = pipeline || {};
+            statusPill.textContent = formatStatus(data.status);
+            statusPill.dataset.status = data.status || 'idle';
+            renderStages(data.steps);
+            renderFiles(data.files);
+            renderOutput(data.output);
+
+            metaEls.runId.textContent = data.runId || '-';
+            metaEls.contextDir.textContent = data.challenge?.contextDir || '-';
+            metaEls.containerName.textContent = data.docker?.containerName || '-';
+            metaEls.promptPath.textContent = data.codex?.promptPath || '-';
+            metaEls.datasetPath.textContent = data.dataset?.packagePath || data.dataset?.filePath || '-';
+
+            const running = data.status === 'running';
+            const codexRunning = running && data.currentStage === 'codex_agent';
+            setBusy(runButton, running);
+            cancelButton.disabled = !codexRunning;
+            datasetButton.disabled = running;
         };
 
-        const updateStatus = (statusValue) => {
-            const normalized = String(statusValue || 'Nothing').toLowerCase();
-            const operating = normalized === 'operational' || normalized === 'operating';
-            statusPill.textContent = operating ? 'Operating' : 'Nothing';
-            statusPill.classList.toggle('status-ready', operating);
-            statusPill.classList.toggle('status-idle', !operating);
-        };
-
-        const fetchStatus = () => {
-            fetch('/dashboard/ai/status', { headers: { 'Accept': 'application/json' } })
-                .then((response) => (response.ok ? response.json() : null))
-                .then((data) => {
-                    if (!data) {
-                        return;
-                    }
-                    const output = data?.ai?.output || [];
-                    const outputKey = Array.isArray(output) ? output.join('\n') : '';
-                    if (outputKey !== lastOutputKey) {
-                        lastOutputKey = outputKey;
-                        renderOutput(output);
-                    }
-                    if (runInProgress && Array.isArray(output)) {
-                        const done = output.some((line) => line.includes('Container Ready') || line.includes('Running Qwen3-Coder30b'));
-                        if (done) {
-                            setRunButtonState(false);
-                        }
-                    }
-                    if (runInProgress && data?.status?.containerRunning) {
-                        setRunButtonState(false);
-                    }
-                    updateStatus(data?.status?.status);
-                })
-                .catch(() => {});
-        };
-
-        runButton.addEventListener('click', async function() {
-            if (this.disabled) {
-                return;
-            }
-            setRunButtonState(true);
-            try {
-                const response = await fetch('/dashboard/ai/run', { method: 'POST' });
-                if (response.ok) {
-                    fetchStatus();
-                    return;
+        const requestPipeline = async (url, options = {}) => {
+            const response = await fetch(url, {
+                ...options,
+                headers: {
+                    'Accept': 'application/json',
+                    ...(options.headers || {})
                 }
-            } catch (error) {
-                // ignore
+            });
+            const data = await response.json();
+            if (data.pipeline) {
+                renderPipeline(data.pipeline);
             }
-            setRunButtonState(false);
+            if (!response.ok) {
+                throw new Error(data.error || 'Request failed.');
+            }
+            return data;
+        };
+
+        uploadInput.addEventListener('change', async function() {
+            if (this.files.length === 0) {
+                return;
+            }
+            uploadFileName.textContent = Array.from(this.files).map((file) => file.name).join(', ');
+            const formData = new FormData(uploadForm);
+            try {
+                await requestPipeline(uploadForm.action, { method: 'POST', body: formData });
+            } catch (error) {
+                renderOutput([error.message]);
+            }
         });
 
-        fetchStatus();
-        setInterval(fetchStatus, 1000);
+        runButton.addEventListener('click', async () => {
+            setBusy(runButton, true);
+            try {
+                await requestPipeline('/dashboard/ai/run', { method: 'POST' });
+            } catch (error) {
+                renderOutput([error.message]);
+                setBusy(runButton, false);
+            }
+        });
+
+        cancelButton.addEventListener('click', async () => {
+            setBusy(cancelButton, true);
+            try {
+                await requestPipeline('/dashboard/ai/cancel', { method: 'POST' });
+            } catch (error) {
+                renderOutput([error.message]);
+            } finally {
+                setBusy(cancelButton, false);
+            }
+        });
+
+        datasetButton.addEventListener('click', async () => {
+            setBusy(datasetButton, true);
+            try {
+                await requestPipeline('/dashboard/ai/dataset', { method: 'POST' });
+            } catch (error) {
+                renderOutput([error.message]);
+            } finally {
+                setBusy(datasetButton, false);
+            }
+        });
+
+        const fetchStatus = () => {
+            requestPipeline('/dashboard/ai/status').catch(() => {});
+        };
+
+        renderPipeline(JSON.parse(document.getElementById('initial-pipeline').textContent || '{}'));
+        setInterval(fetchStatus, 1500);
     </script>
 </body>
 </html>

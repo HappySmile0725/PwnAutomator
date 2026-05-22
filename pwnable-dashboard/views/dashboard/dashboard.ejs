@@ -19,10 +19,10 @@
         const historyItems = Array.isArray(dashboard?.recent) ? dashboard.recent : [];
         const currentItem = historyItems[0] || null;
         const currentStart = currentItem?.start || '-';
-        const rawStatus = ai?.status ?? ai?.operating ?? ai?.isOperating ?? ai?.state ?? ai?.running;
+        const rawStatus = ai?.pipelineStatus ?? ai?.status ?? ai?.operating ?? ai?.isOperating ?? ai?.state ?? ai?.running;
         const normalizedStatus = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : rawStatus;
         const isOperating = normalizedStatus === true || ['operating', 'operational', 'running', 'active', 'on'].includes(normalizedStatus);
-        const aiStatusText = isOperating ? 'Operating' : 'Nothing';
+        const aiStatusText = isOperating ? 'Operating' : String(rawStatus || 'Nothing').replace(/_/g, ' ');
         const aiStatusClass = isOperating ? 'status-ok' : 'status-idle';
         const stats = dashboard?.statistics || {};
         const stackCount = Number(stats.stack) || 0;

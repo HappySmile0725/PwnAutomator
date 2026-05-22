@@ -25,9 +25,21 @@ MAX_BUFFER_BYTES = 1_000_000
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 MCPS_DIR = os.path.abspath(os.path.join(THIS_DIR, "..", ".."))
 PROJECT_ROOT = os.path.abspath(os.path.join(MCPS_DIR, ".."))
-TEST_DIR = os.path.join(MCPS_DIR, "test")
+
+
+def _resolve_challenge_dir() -> str:
+    configured = os.environ.get("PWN_AUTOMATOR_CHALLENGE_DIR") or os.environ.get("PWNTOOLS_MCP_CHALLENGE_DIR")
+    if configured:
+        if os.path.isabs(configured):
+            return os.path.abspath(configured)
+        return os.path.abspath(os.path.join(PROJECT_ROOT, configured))
+    return os.path.join(MCPS_DIR, "test")
+
+
+TEST_DIR = _resolve_challenge_dir()
 FIXED_PAYLOAD_PATH = os.path.join(TEST_DIR, FIXED_PAYLOAD_FILENAME)
-DEFAULT_BINARY_PATH = os.path.join(MCPS_DIR, "test", "chall")
+DEFAULT_BINARY_NAME = os.environ.get("PWN_AUTOMATOR_BINARY_NAME", "chall")
+DEFAULT_BINARY_PATH = os.path.join(TEST_DIR, DEFAULT_BINARY_NAME)
 
 
 def _ok(**kwargs: Any) -> Dict[str, Any]:
@@ -65,6 +77,23 @@ def _normalize_path_text(text: str) -> str:
     return str(text or "").strip().replace("\\", "/")
 
 
+def _default_binary_path() -> str:
+    configured = os.environ.get("PWN_AUTOMATOR_BINARY_PATH") or os.environ.get("PWNTOOLS_MCP_BINARY_PATH")
+    if configured:
+        return os.path.abspath(configured)
+
+    marker_path = os.path.join(TEST_DIR, ".pwnautomator", "current_binary")
+    try:
+        with open(marker_path, "r", encoding="utf-8") as handle:
+            marked = handle.read().strip()
+        if marked:
+            return os.path.abspath(marked)
+    except OSError:
+        pass
+
+    return os.path.abspath(DEFAULT_BINARY_PATH)
+
+
 def _resolve_payload_path(path_or_name: str) -> str:
     text = str(path_or_name or "").strip()
     expected_path = os.path.abspath(FIXED_PAYLOAD_PATH)
@@ -94,15 +123,16 @@ def _resolve_payload_path(path_or_name: str) -> str:
         if os.path.normcase(candidate) == os.path.normcase(expected_path):
             return expected_path
 
-    raise ValueError("payload path must be mcps/test/hack.py")
+    raise ValueError("payload path must be the active challenge workspace hack.py")
 
 
-def render_payload_template(payload_content: str) -> str:
+def render_payload_template(payload_content: str, binary_path: str | None = None) -> str:
     body = _normalize_payload_body(payload_content)
+    binary_name = os.path.basename(binary_path or _default_binary_path()) or DEFAULT_BINARY_NAME
     lines = [
         TEMPLATE_IMPORT_LINE,
-        TEMPLATE_PROCESS_LINE,
-        TEMPLATE_ELF_LINE,
+        "p = process('./%s')" % binary_name,
+        "e = ELF('./%s', checksec=False)" % binary_name,
         "",
         body,
         "",
@@ -115,22 +145,25 @@ def is_template_payload(text: str) -> bool:
     data = str(text or "")
     required = (
         TEMPLATE_IMPORT_LINE,
-        TEMPLATE_PROCESS_LINE,
-        TEMPLATE_ELF_LINE,
         TEMPLATE_INTERACTIVE_LINE,
     )
-    return all(token in data for token in required)
+    return all(token in data for token in required) and "process('./" in data and "ELF('./" in data
 
 
 def extract_payload_body(text: str) -> str:
     data = str(text or "")
-    prefix = TEMPLATE_ELF_LINE
     suffix = TEMPLATE_INTERACTIVE_LINE
-    start = data.find(prefix)
+    start = -1
+    offset = 0
+    for line in data.splitlines():
+        offset += len(line) + 1
+        if line.startswith("e = ELF("):
+            start = offset
+            break
     end = data.rfind(suffix)
     if start < 0 or end < 0 or end <= start:
         return ""
-    body = data[start + len(prefix) : end].strip("\n")
+    body = data[start:end].strip("\n")
     return body.strip()
 
 
@@ -157,13 +190,14 @@ class PwntoolsRuntime:
         try:
             os.makedirs(TEST_DIR, exist_ok=True)
             output_path = os.path.abspath(FIXED_PAYLOAD_PATH)
-            script = render_payload_template(payload_content)
+            target_binary = _default_binary_path()
+            script = render_payload_template(payload_content, binary_path=target_binary)
             with open(output_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(script)
             return _ok(
                 path=output_path,
                 filename=FIXED_PAYLOAD_FILENAME,
-                target_binary_default=os.path.abspath(DEFAULT_BINARY_PATH),
+                target_binary_default=target_binary,
             )
         except Exception as exc:
             return _error(str(exc))
@@ -219,13 +253,13 @@ class PwntoolsRuntime:
                     path=payload_path,
                     expected_lines=[
                         TEMPLATE_IMPORT_LINE,
-                        TEMPLATE_PROCESS_LINE,
-                        TEMPLATE_ELF_LINE,
+                        "p = process('./<active binary>')",
+                        "e = ELF('./<active binary>', checksec=False)",
                         TEMPLATE_INTERACTIVE_LINE,
                     ],
                 )
 
-            target_binary = os.path.abspath(DEFAULT_BINARY_PATH)
+            target_binary = _default_binary_path()
             if not os.path.exists(target_binary):
                 return _error("target binary does not exist", binary_path=target_binary)
 

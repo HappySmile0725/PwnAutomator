@@ -1,0 +1,9 @@
+{
+  "schema": "pwnautomator.raw_trace.v1",
+  "runId": "20260522123729-77ef69",
+  "status": "success",
+  "publishedAt": "2026-05-22T12:57:27.066Z",
+  "eventCount": 839,
+  "currentTracePath": "/mnt/d/Coding/Projects/PwnAutomator/pwnable-dashboard/data/storage/now/trace/codex_raw_trace.jsonl",
+  "rawDatasetPath": "/mnt/d/Coding/Projects/PwnAutomator/datasets/raw/20260522123729-77ef69.jsonl"
+}

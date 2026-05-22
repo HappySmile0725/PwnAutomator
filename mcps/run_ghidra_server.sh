@@ -9,7 +9,11 @@ SCRIPT_PATH="./ghidra_tools/server"
 POST_SCRIPT="ghidra_server.py"
 DEBUG_SERVER="./ghidra_tools/gdb_server/server.py"
 PWN_SERVER="./pwntools_tools/server/server.py"
-BINARY_PATH="${1:-./test/chall}"
+DEFAULT_BINARY_PATH="${PWN_AUTOMATOR_BINARY_PATH:-./test/chall}"
+if [[ -z "${1:-}" && -f "./test/.pwnautomator/current_binary" ]]; then
+  DEFAULT_BINARY_PATH="$(cat ./test/.pwnautomator/current_binary)"
+fi
+BINARY_PATH="${1:-$DEFAULT_BINARY_PATH}"
 PROGRAM_NAME="$(basename "$BINARY_PATH")"
 BINARY_ABS="$BINARY_PATH"
 if [[ -e "$BINARY_PATH" ]]; then
@@ -87,12 +91,18 @@ start_debug_bridge() {
   tail -f /dev/null > "$DBG_STDIN_FIFO" &
   echo $! > "$DBG_STDIN_PID"
 
-  gdb --quiet -nx -nh -x "$DEBUG_SERVER" < "$DBG_STDIN_FIFO" > /dev/null 2>&1 &
+  env \
+    PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
+    PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
+    gdb --quiet -nx -nh -x "$DEBUG_SERVER" < "$DBG_STDIN_FIFO" > /dev/null 2>&1 &
   echo $! > "$DBG_PID"
 }
 
 start_pwntools_mcp() {
-  python3 "$PWN_SERVER" --host 0.0.0.0 --port "$PPORT" > /dev/null 2>&1 &
+  env \
+    PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
+    PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
+    python3 "$PWN_SERVER" --host 0.0.0.0 --port "$PPORT" > /dev/null 2>&1 &
   echo $! > "$PWN_PID"
 }
 
@@ -168,6 +178,8 @@ env \
   GHIDRA_MCP_DEBUG_HOST="127.0.0.1" \
   GHIDRA_MCP_DEBUG_PORT="19090" \
   GHIDRA_MCP_BINARY_PATH="$BINARY_ABS" \
+  PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
+  PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
   "$ANALYZE" "$PROJECT_DIR" "$PROJECT_NAME" "${MODE[@]}" \
   -scriptPath "$SCRIPT_PATH" -postScript "$POST_SCRIPT" &
 echo $! > "$HEADLESS_PID"
