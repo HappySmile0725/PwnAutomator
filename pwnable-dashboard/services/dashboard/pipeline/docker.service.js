@@ -21,6 +21,12 @@ const ignoredBinaryExtensions = new Set([
     '.zip'
 ]);
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isRemovalConflict = (error) => {
+    const message = String(error?.message || '').toLowerCase();
+    return error?.statusCode === 409 || message.includes('already in progress');
+};
+
 const findDockerContext = (baseDir) => {
     if (!baseDir || !fs.existsSync(baseDir)) {
         return null;
@@ -111,16 +117,24 @@ const removeContainerByName = async (containerName) => {
         return;
     }
 
-    try {
-        const container = dockerClient.getContainer(containerName);
-        const info = await container.inspect();
-        if (info?.State?.Running) {
-            await container.stop({ t: 5 });
-        }
-        await container.remove({ force: true });
-    } catch (error) {
-        if (error.statusCode !== 404) {
-            throw error;
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+        try {
+            const container = dockerClient.getContainer(containerName);
+            const info = await container.inspect();
+            if (info?.State?.Running) {
+                await container.stop({ t: 5 });
+            }
+            await container.remove({ force: true });
+            return;
+        } catch (error) {
+            if (error?.statusCode === 404) {
+                return;
+            }
+            const transientConflict = isRemovalConflict(error);
+            if (!transientConflict || attempt === 10) {
+                throw error;
+            }
+            await sleep(200 * attempt);
         }
     }
 };
@@ -193,19 +207,31 @@ const stopStaleChallengeContainers = async ({ keepRunId, keepContainerName } = {
     }
 
     for (const containerInfo of stale) {
-        try {
-            const ref = containerInfo.id || containerInfo.name;
-            if (!ref) {
-                continue;
-            }
-            const container = dockerClient.getContainer(ref);
-            if (containerInfo.wasRunning) {
-                await container.stop({ t: 5 });
-            }
-            await container.remove({ force: true });
-        } catch (error) {
-            if (error?.statusCode !== 404) {
-                throw error;
+        const ref = containerInfo.id || containerInfo.name;
+        if (!ref) {
+            continue;
+        }
+
+        for (let attempt = 1; attempt <= 10; attempt += 1) {
+            try {
+                const container = dockerClient.getContainer(ref);
+                if (containerInfo.wasRunning) {
+                    await container.stop({ t: 5 });
+                }
+                await container.remove({ force: true });
+                break;
+            } catch (error) {
+                if (error?.statusCode === 404) {
+                    break;
+                }
+                const transientConflict = isRemovalConflict(error);
+                if (!transientConflict) {
+                    throw error;
+                }
+                if (attempt === 10) {
+                    break;
+                }
+                await sleep(200 * attempt);
             }
         }
     }

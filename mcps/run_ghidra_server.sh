@@ -23,10 +23,12 @@ HPORT=9999
 PPORT=19191
 PWNO_PORT="${PWNO_MCP_PORT:-5500}"
 HEADLESS_READY_TIMEOUT="${GHIDRA_MCP_HEADLESS_READY_TIMEOUT:-300}"
-PWNO_READY_TIMEOUT="${PWNO_MCP_READY_TIMEOUT:-120}"
-HEADLESS_PID=/tmp/ghidra_headless.pid
-PWN_PID=/tmp/pwntools_mcp.pid
-PWNO_PID=/tmp/pwno_mcp.pid
+PWNO_READY_TIMEOUT="${PWNO_MCP_READY_TIMEOUT:-300}"
+HEADLESS_PID=""
+PWN_PID=""
+PWNO_PID=""
+PWNO_LOG=/tmp/pwno_mcp_runtime.log
+PWN_LOG=/tmp/pwntools_mcp_runtime.log
 
 require_cmd() {
   local cmd="$1"
@@ -63,11 +65,7 @@ kill_port() {
 }
 
 stop_pid() {
-  local pf="$1" pid=""
-  if [[ -f "$pf" ]]; then
-    pid="$(cat "$pf" 2>/dev/null || true)"
-  fi
-
+  local pid="${1:-}"
   if [[ -n "$pid" ]]; then
     # Kill children first (important for Ghidra which spawns Java)
     echo "[cleanup] killing children of ${pid}..."
@@ -79,26 +77,27 @@ stop_pid() {
     kill -9 "$pid" 2>/dev/null || true
     pkill -9 -P "$pid" 2>/dev/null || true
   fi
-  rm -f "$pf"
 }
 
 start_pwntools_mcp() {
+  : > "$PWN_LOG"
   env \
     PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
     PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
     PWNTOOLS_MCP_BIND_HOST="0.0.0.0" \
     PWNTOOLS_MCP_BIND_PORT="$PPORT" \
-    python3 "$PWN_SERVER" > /dev/null 2>&1 &
-  echo $! > "$PWN_PID"
+    python3 "$PWN_SERVER" >"$PWN_LOG" 2>&1 &
+  PWN_PID="$!"
 }
 
 start_pwno_mcp() {
+  : > "$PWNO_LOG"
   env \
     PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
     PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
     PWNO_MCP_PORT="$PWNO_PORT" \
-    bash "$PWNO_SERVER" http > /dev/null 2>&1 &
-  echo $! > "$PWNO_PID"
+    bash "$PWNO_SERVER" http >"$PWNO_LOG" 2>&1 &
+  PWNO_PID="$!"
 }
 
 validate_runtime() {
@@ -153,7 +152,7 @@ env \
   PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
   "$ANALYZE" "$PROJECT_DIR" "$PROJECT_NAME" "${MODE[@]}" \
   -scriptPath "$SCRIPT_PATH" -postScript "$POST_SCRIPT" &
-echo $! > "$HEADLESS_PID"
+HEADLESS_PID="$!"
 
 wait_ready() {
   local name="$1" port="$2" pid="$3" timeout_secs="${4:-120}" i=0
@@ -162,7 +161,18 @@ wait_ready() {
       exec 3>&-
       return 0
     fi
-    kill -0 "$pid" 2>/dev/null || { echo "[error] $name exited before ready" >&2; exit 1; }
+    if ! kill -0 "$pid" 2>/dev/null; then
+      if [[ "$name" == "pwno_mcp" && -f "$PWNO_LOG" ]]; then
+        echo "[error] $name exited before ready (last logs):" >&2
+        tail -n 80 "$PWNO_LOG" >&2 || true
+      elif [[ "$name" == "pwntools_mcp" && -f "$PWN_LOG" ]]; then
+        echo "[error] $name exited before ready (last logs):" >&2
+        tail -n 80 "$PWN_LOG" >&2 || true
+      else
+        echo "[error] $name exited before ready" >&2
+      fi
+      exit 1
+    fi
     sleep 1
     i=$((i + 1))
   done
@@ -171,17 +181,17 @@ wait_ready() {
 }
 
 echo "[info] Waiting for Pwntools MCP (port $PPORT)..."
-wait_ready "pwntools_mcp" "$PPORT" "$(cat "$PWN_PID")"
+wait_ready "pwntools_mcp" "$PPORT" "$PWN_PID"
 echo "[ok] Pwntools MCP ready."
 
 echo "[info] Waiting for Pwno MCP (port $PWNO_PORT)..."
-wait_ready "pwno_mcp" "$PWNO_PORT" "$(cat "$PWNO_PID")" "$PWNO_READY_TIMEOUT"
+wait_ready "pwno_mcp" "$PWNO_PORT" "$PWNO_PID" "$PWNO_READY_TIMEOUT"
 echo "[ok] Pwno MCP ready."
 
 echo "[info] Waiting for Ghidra Headless (port $HPORT)..."
-wait_ready "headless" "$HPORT" "$(cat "$HEADLESS_PID")" "$HEADLESS_READY_TIMEOUT"
+wait_ready "headless" "$HPORT" "$HEADLESS_PID" "$HEADLESS_READY_TIMEOUT"
 echo "[ok] Ghidra Headless ready."
-echo "[ok] pwno pid=$(cat "$PWNO_PID"), pwntools pid=$(cat "$PWN_PID"), headless pid=$(cat "$HEADLESS_PID")"
+echo "[ok] pwno pid=$PWNO_PID, pwntools pid=$PWN_PID, headless pid=$HEADLESS_PID"
 echo "[info] Services running. Press Ctrl+C to stop."
 
 wait
