@@ -86,7 +86,9 @@ start_pwntools_mcp() {
   env \
     PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
     PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
-    python3 "$PWN_SERVER" --host 0.0.0.0 --port "$PPORT" > /dev/null 2>&1 &
+    PWNTOOLS_MCP_BIND_HOST="0.0.0.0" \
+    PWNTOOLS_MCP_BIND_PORT="$PPORT" \
+    python3 "$PWN_SERVER" > /dev/null 2>&1 &
   echo $! > "$PWN_PID"
 }
 
@@ -101,7 +103,6 @@ start_pwno_mcp() {
 
 validate_runtime() {
   require_cmd python3
-  require_cmd docker
   [[ -x "$ANALYZE" ]] || { echo "[error] analyzeHeadless not found: $ANALYZE" >&2; exit 1; }
   [[ -f "$PWN_SERVER" ]] || { echo "[error] pwntools server not found: $PWN_SERVER" >&2; exit 1; }
   [[ -f "$PWNO_SERVER" ]] || { echo "[error] pwno server launcher not found: $PWNO_SERVER" >&2; exit 1; }

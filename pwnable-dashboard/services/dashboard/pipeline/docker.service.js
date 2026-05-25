@@ -163,28 +163,9 @@ const containerMatchesChallenge = (info, { runId, containerName, imageTag } = {}
     return false;
 };
 
-const listStaleCleanupCandidates = async () => {
-    const labelFiltered = await listContainersSafe({
-        all: true,
-        filters: JSON.stringify({ label: [`${CHALLENGE_ROLE_LABEL}=${CHALLENGE_ROLE}`] })
-    });
-    const nameFiltered = await listContainersSafe({
-        all: true,
-        filters: JSON.stringify({ name: ['pwnautomator-'] })
-    });
-
-    const merged = new Map();
-    for (const container of [...labelFiltered, ...nameFiltered]) {
-        if (container?.Id) {
-            merged.set(container.Id, container);
-        }
-    }
-    return Array.from(merged.values());
-};
-
 const stopStaleChallengeContainers = async ({ keepRunId, keepContainerName } = {}) => {
     const keepName = normalizeContainerName(keepContainerName);
-    const containers = await listStaleCleanupCandidates();
+    const containers = await listContainersSafe({ all: true });
     const stale = [];
 
     for (const container of containers) {
@@ -240,34 +221,11 @@ const findRunningChallengeContainer = async ({ runId, containerId, containerName
         }
     }
 
-    const labelFilters = [`${CHALLENGE_ROLE_LABEL}=${CHALLENGE_ROLE}`];
-    if (runId) {
-        labelFilters.push(`${CHALLENGE_RUN_LABEL}=${runId}`);
-    }
-
-    const containers = await dockerClient.listContainers({
-        all: false,
-        filters: JSON.stringify({ label: labelFilters })
-    }).catch(() => []);
-
+    const containers = await listContainersSafe({ all: false });
     for (const container of containers) {
         const info = await inspectContainerSafe(container.Id);
         if (containerMatchesChallenge(info, { runId, containerName, imageTag })) {
             return info;
-        }
-    }
-
-    if (imageTag) {
-        const imageContainers = await dockerClient.listContainers({
-            all: false,
-            filters: JSON.stringify({ ancestor: [imageTag] })
-        }).catch(() => []);
-
-        for (const container of imageContainers) {
-            const info = await inspectContainerSafe(container.Id);
-            if (containerMatchesChallenge(info, { runId, containerName, imageTag })) {
-                return info;
-            }
         }
     }
 
@@ -425,7 +383,6 @@ module.exports = {
     findDockerContext,
     inspectContainer,
     isContainerRunning,
-    removeContainerByName,
     resolveTrackingFiles,
     stopStaleChallengeContainers,
     startContainer

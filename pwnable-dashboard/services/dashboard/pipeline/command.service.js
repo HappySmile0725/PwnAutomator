@@ -69,9 +69,6 @@ const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, ki
     let aborted = false;
     const child = spawn(command, args || [], spawnOptions);
 
-    let stdout = '';
-    let stderr = '';
-
     const abort = () => {
         aborted = true;
         terminateChild(child, killTimeoutMs);
@@ -87,11 +84,6 @@ const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, ki
 
     const handleData = (level) => (chunk) => {
         const text = chunk.toString();
-        if (level === 'stderr') {
-            stderr += text;
-        } else {
-            stdout += text;
-        }
 
         if (typeof onData === 'function') {
             onData(level, text);
@@ -113,7 +105,7 @@ const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, ki
         if (signal) {
             signal.removeEventListener('abort', abort);
         }
-        resolve({ code, stdout, stderr, canceled: aborted });
+        resolve({ code, canceled: aborted });
     });
 
     if (stdin) {
@@ -125,6 +117,5 @@ const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, ki
 module.exports = {
     applyTemplate,
     parseCommandLine,
-    runCommand,
-    terminateChild
+    runCommand
 };

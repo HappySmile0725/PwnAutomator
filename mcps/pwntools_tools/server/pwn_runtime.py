@@ -26,7 +26,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(MCPS_DIR, ".."))
 
 
 def _resolve_challenge_dir() -> str:
-    configured = os.environ.get("PWN_AUTOMATOR_CHALLENGE_DIR") or os.environ.get("PWNTOOLS_MCP_CHALLENGE_DIR")
+    configured = os.environ.get("PWN_AUTOMATOR_CHALLENGE_DIR")
     if configured:
         if os.path.isabs(configured):
             return os.path.abspath(configured)
@@ -76,7 +76,7 @@ def _normalize_path_text(text: str) -> str:
 
 
 def _default_binary_path() -> str:
-    configured = os.environ.get("PWN_AUTOMATOR_BINARY_PATH") or os.environ.get("PWNTOOLS_MCP_BINARY_PATH")
+    configured = os.environ.get("PWN_AUTOMATOR_BINARY_PATH")
     if configured:
         return os.path.abspath(configured)
 
@@ -451,44 +451,3 @@ class PwntoolsRuntime:
 
 
 RUNTIME = PwntoolsRuntime()
-
-
-def write_payload(payload_content: str) -> Dict[str, Any]:
-    return RUNTIME.write_payload(payload_content=payload_content)
-
-
-def read_payload(path: str) -> Dict[str, Any]:
-    return RUNTIME.read_payload(path=path)
-
-
-def list_payloads() -> Dict[str, Any]:
-    return RUNTIME.list_payloads()
-
-
-def execute_payload(
-    path: str, wait_ms: int = 300
-) -> Dict[str, Any]:
-    return RUNTIME.execute_payload(
-        path=path,
-        wait_ms=wait_ms,
-    )
-
-
-def poll_session(session_id: str) -> Dict[str, Any]:
-    return RUNTIME.poll_session(session_id=session_id)
-
-
-def send_input(session_id: str, data: str, append_newline: bool = False) -> Dict[str, Any]:
-    return RUNTIME.send_input(session_id=session_id, data=data, append_newline=append_newline)
-
-
-def continue_pause(session_id: str) -> Dict[str, Any]:
-    return RUNTIME.continue_pause(session_id=session_id)
-
-
-def stop_session(session_id: str, kill: bool = False) -> Dict[str, Any]:
-    return RUNTIME.stop_session(session_id=session_id, kill=kill)
-
-
-def list_sessions() -> Dict[str, Any]:
-    return RUNTIME.list_sessions()

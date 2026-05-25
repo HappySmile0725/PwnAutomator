@@ -1,14 +1,13 @@
 const bcrypt = require('bcrypt');
-const { getUsername, writeUser } = require('./user.service');
+const { addUser, getUserById } = require('./user.service');
 
 const register = async (id, password) => {
-    const existingUsers = await getUsername(id);
-    if (existingUsers.length > 0) {
+    if (await getUserById(id)) {
         return { success: false, message: 'ID already exists' };
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    await writeUser(id, hashedPassword);
+    await addUser(id, hashedPassword);
     return { success: true };
 };
 

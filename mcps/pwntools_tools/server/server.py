@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import socket
@@ -126,17 +125,11 @@ def run_server(host: str, port: int, max_request_bytes: int = DEFAULT_MAX_REQUES
     return 0
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="pwntools MCP TCP server")
-    parser.add_argument("--host", default=os.environ.get("PWNTOOLS_MCP_BIND_HOST", DEFAULT_BIND_HOST))
-    parser.add_argument("--port", type=int, default=_env_int("PWNTOOLS_MCP_BIND_PORT", DEFAULT_BIND_PORT))
-    parser.add_argument("--max-request-bytes", type=int, default=_env_int("PWNTOOLS_MCP_MAX_REQUEST_BYTES", DEFAULT_MAX_REQUEST_BYTES))
-    return parser.parse_args()
-
-
 def main() -> int:
-    args = parse_args()
-    return run_server(host=args.host, port=args.port, max_request_bytes=args.max_request_bytes)
+    host = os.environ.get("PWNTOOLS_MCP_BIND_HOST", DEFAULT_BIND_HOST)
+    port = _env_int("PWNTOOLS_MCP_BIND_PORT", DEFAULT_BIND_PORT)
+    max_request_bytes = _env_int("PWNTOOLS_MCP_MAX_REQUEST_BYTES", DEFAULT_MAX_REQUEST_BYTES)
+    return run_server(host=host, port=port, max_request_bytes=max_request_bytes)
 
 
 if __name__ == "__main__":

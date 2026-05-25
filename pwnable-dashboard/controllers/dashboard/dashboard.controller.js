@@ -38,10 +38,6 @@ const showDashboard = async (req, res) => {
         const dashboardData = await dashboardService.getDashboardData();
         const aiData = await pipelineService.getPipelineStatus();
 
-        if (!dashboardData) {
-            throw new Error('Unable to load dashboard data.');
-        }
-
         return res.status(200).render('dashboard/dashboard', {
             title: 'Dashboard',
             dashboard: dashboardData,

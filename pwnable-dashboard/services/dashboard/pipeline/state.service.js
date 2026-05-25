@@ -1,5 +1,7 @@
+const fs = require('fs');
+const path = require('path');
+
 const paths = require('./paths');
-const pipelineModel = require('../../../models/dashboard/pipeline.model');
 
 const STAGE_DEFINITIONS = [
     { key: 'challenge_upload', label: 'Challenge Upload' },
@@ -64,12 +66,18 @@ const normalizeState = (state) => {
 };
 
 const readState = () => {
-    return normalizeState(pipelineModel.readStateFile(paths.pipelineStatePath, createEmptyState()));
+    try {
+        return normalizeState(JSON.parse(fs.readFileSync(paths.pipelineStatePath, 'utf8')));
+    } catch (_) {
+        return createEmptyState();
+    }
 };
 
 const writeState = (state) => {
     const normalized = normalizeState({ ...state, updatedAt: nowIso() });
-    return pipelineModel.writeStateFile(paths.pipelineStatePath, normalized);
+    fs.mkdirSync(path.dirname(paths.pipelineStatePath), { recursive: true });
+    fs.writeFileSync(paths.pipelineStatePath, JSON.stringify(normalized, null, 2), 'utf8');
+    return normalized;
 };
 
 const updateState = (mutator) => {
@@ -132,12 +140,6 @@ const startUploadedRun = (runData) => {
     state.createdAt = timestamp;
     state.updatedAt = timestamp;
     state.challenge = runData.challenge;
-    state.mcpRuntime = null;
-    state.docker = null;
-    state.runtime = null;
-    state.codex = null;
-    state.dataset = null;
-    state.logs = [];
     state.stages[0] = {
         ...state.stages[0],
         status: 'success',

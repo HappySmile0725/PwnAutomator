@@ -1,18 +1,17 @@
 const userModel = require('../../models/auth/user.model');
 
-const getUsername = async (id) => {
+const getUserById = async (id) => {
     const users = await userModel.readUsers();
-    return users.filter((user) => user.id === id);
+    return users.find((user) => user.id === id) || null;
 };
 
-const writeUser = async (id, hashedPassword) => {
+const addUser = async (id, hashedPassword) => {
     const users = await userModel.readUsers();
     users.push({ id, password: hashedPassword });
-    await userModel.writeUsers(users);
-    return true;
+    return userModel.writeUsers(users);
 };
 
 module.exports = {
-    getUsername,
-    writeUser
+    addUser,
+    getUserById
 };

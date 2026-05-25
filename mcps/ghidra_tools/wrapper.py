@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import sys
@@ -584,47 +583,21 @@ class MCPServer:
             }
 
 
-def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Claude MCP wrapper for ghidra_tools")
-    parser.add_argument("--host", default=os.environ.get("GHIDRA_HOST", DEFAULT_HOST))
-    parser.add_argument(
-        "--port",
-        default=_parse_env_port(os.environ.get("GHIDRA_PORT"), DEFAULT_PORT),
-        type=int,
-    )
-    parser.add_argument(
-        "--pwn-host",
-        default=os.environ.get("GHIDRA_MCP_PWN_HOST", DEFAULT_PWN_HOST),
-    )
-    parser.add_argument(
-        "--pwn-port",
-        default=_parse_env_port(
-            os.environ.get("GHIDRA_MCP_PWN_PORT"),
-            DEFAULT_PWN_PORT,
-        ),
-        type=int,
-    )
-    parser.add_argument(
-        "--pwn-timeout",
-        default=_parse_env_float(
-            os.environ.get("GHIDRA_MCP_PWN_TIMEOUT"),
-            DEFAULT_PWN_TIMEOUT,
-        ),
-        type=float,
-    )
-    parser.add_argument("--verbose", action="store_true")
-    return parser.parse_args(argv)
+def _env_verbose(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def main(argv: List[str] | None = None) -> int:
-    args = parse_args(argv)
+def main() -> int:
     server = MCPServer(
-        host=args.host,
-        port=args.port,
-        pwn_host=args.pwn_host,
-        pwn_port=args.pwn_port,
-        pwn_timeout=args.pwn_timeout,
-        verbose=args.verbose,
+        host=os.environ.get("GHIDRA_HOST", DEFAULT_HOST),
+        port=_parse_env_port(os.environ.get("GHIDRA_PORT"), DEFAULT_PORT),
+        pwn_host=os.environ.get("GHIDRA_MCP_PWN_HOST", DEFAULT_PWN_HOST),
+        pwn_port=_parse_env_port(os.environ.get("GHIDRA_MCP_PWN_PORT"), DEFAULT_PWN_PORT),
+        pwn_timeout=_parse_env_float(os.environ.get("GHIDRA_MCP_PWN_TIMEOUT"), DEFAULT_PWN_TIMEOUT),
+        verbose=_env_verbose("GHIDRA_WRAPPER_VERBOSE", False),
     )
     return server.run()
 
