@@ -7,8 +7,8 @@ PROJECT_DIR="challenge"
 PROJECT_NAME="test"
 SCRIPT_PATH="./ghidra_tools/server"
 POST_SCRIPT="ghidra_server.py"
-DEBUG_SERVER="./ghidra_tools/gdb_server/server.py"
 PWN_SERVER="./pwntools_tools/server/server.py"
+PWNO_SERVER="./run_pwno_mcp_stdio.sh"
 DEFAULT_BINARY_PATH="${PWN_AUTOMATOR_BINARY_PATH:-./test/chall}"
 if [[ -z "${1:-}" && -f "./test/.pwnautomator/current_binary" ]]; then
   DEFAULT_BINARY_PATH="$(cat ./test/.pwnautomator/current_binary)"
@@ -20,14 +20,13 @@ if [[ -e "$BINARY_PATH" ]]; then
   BINARY_ABS="$(realpath "$BINARY_PATH")"
 fi
 HPORT=9999
-DPORT=19090
 PPORT=19191
+PWNO_PORT="${PWNO_MCP_PORT:-5500}"
 HEADLESS_READY_TIMEOUT="${GHIDRA_MCP_HEADLESS_READY_TIMEOUT:-300}"
-DBG_PID=/tmp/ghidra_debug_bridge.pid
-DBG_STDIN_PID=/tmp/ghidra_debug_bridge_stdin.pid
-DBG_STDIN_FIFO=/tmp/ghidra_debug_bridge_stdin.fifo
+PWNO_READY_TIMEOUT="${PWNO_MCP_READY_TIMEOUT:-120}"
 HEADLESS_PID=/tmp/ghidra_headless.pid
 PWN_PID=/tmp/pwntools_mcp.pid
+PWNO_PID=/tmp/pwno_mcp.pid
 
 require_cmd() {
   local cmd="$1"
@@ -83,21 +82,6 @@ stop_pid() {
   rm -f "$pf"
 }
 
-start_debug_bridge() {
-  rm -f "$DBG_STDIN_FIFO"
-  mkfifo "$DBG_STDIN_FIFO"
-
-  # Keep GDB stdin open in non-interactive runs to prevent immediate EOF-exit.
-  tail -f /dev/null > "$DBG_STDIN_FIFO" &
-  echo $! > "$DBG_STDIN_PID"
-
-  env \
-    PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
-    PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
-    gdb --quiet -nx -nh -x "$DEBUG_SERVER" < "$DBG_STDIN_FIFO" > /dev/null 2>&1 &
-  echo $! > "$DBG_PID"
-}
-
 start_pwntools_mcp() {
   env \
     PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
@@ -106,39 +90,34 @@ start_pwntools_mcp() {
   echo $! > "$PWN_PID"
 }
 
-validate_runtime() {
-  require_cmd gdb
-  require_cmd python3
-  [[ -x "$ANALYZE" ]] || { echo "[error] analyzeHeadless not found: $ANALYZE" >&2; exit 1; }
-  [[ -f "$PWN_SERVER" ]] || { echo "[error] pwntools server not found: $PWN_SERVER" >&2; exit 1; }
-  local gdb_probe
-  gdb_probe="$(gdb --batch --quiet -nx -nh -ex "python import sys" 2>&1 || true)"
-  if grep -qi "python scripting is not supported" <<<"$gdb_probe"; then
-    echo "[error] gdb python support required (current gdb does not support 'python')." >&2
-    exit 1
-  fi
+start_pwno_mcp() {
+  env \
+    PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
+    PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
+    PWNO_MCP_PORT="$PWNO_PORT" \
+    bash "$PWNO_SERVER" http > /dev/null 2>&1 &
+  echo $! > "$PWNO_PID"
 }
 
-cleanup_artifacts() {
-  echo "[cleanup] removing __pycache__ and .class artifacts..."
-  find "./ghidra_tools" "./pwntools_tools" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-  find "./ghidra_tools" -type f -name "*.class" -delete 2>/dev/null || true
+validate_runtime() {
+  require_cmd python3
+  require_cmd docker
+  [[ -x "$ANALYZE" ]] || { echo "[error] analyzeHeadless not found: $ANALYZE" >&2; exit 1; }
+  [[ -f "$PWN_SERVER" ]] || { echo "[error] pwntools server not found: $PWN_SERVER" >&2; exit 1; }
+  [[ -f "$PWNO_SERVER" ]] || { echo "[error] pwno server launcher not found: $PWNO_SERVER" >&2; exit 1; }
 }
 
 cleanup() {
   echo "[cleanup] stopping servers..."
   trap - EXIT # prevent loop
+  stop_pid "$PWNO_PID"
   stop_pid "$PWN_PID"
-  stop_pid "$DBG_PID"
-  stop_pid "$DBG_STDIN_PID"
   stop_pid "$HEADLESS_PID"
   kill_stale_headless
-  rm -f "$DBG_STDIN_FIFO"
+  kill_port "$PWNO_PORT"
   kill_port "$PPORT"
-  kill_port "$DPORT"
   kill_port "$HPORT"
   cleanup_project_locks
-  cleanup_artifacts
   echo "[cleanup] done."
 }
 
@@ -149,16 +128,14 @@ has_program() {
   [[ -d "$idata" ]] && grep -R -F "STATE NAME=\"NAME\" TYPE=\"string\" VALUE=\"${PROGRAM_NAME}\"" "$idata" --include='*.prp' >/dev/null 2>&1
 }
 
-kill_port "$DPORT"
 kill_port "$HPORT"
 kill_port "$PPORT"
+kill_port "$PWNO_PORT"
 validate_runtime
 kill_stale_headless
 cleanup_project_locks
 
-# Launch GDB In-Process Server (headless)
-# It binds to 0.0.0.0:19090 by default
-start_debug_bridge
+start_pwno_mcp
 start_pwntools_mcp
 
 MODE=(-process "$PROGRAM_NAME")
@@ -167,16 +144,9 @@ if ! has_program; then
   MODE=(-import "$BINARY_PATH")
 fi
 
-# Remove potential project lock files
-cleanup_project_locks
-
 env \
   GHIDRA_MCP_BIND_HOST="0.0.0.0" \
   GHIDRA_MCP_BIND_PORT="$HPORT" \
-  GHIDRA_MCP_DEBUG_BIND_HOST="0.0.0.0" \
-  GHIDRA_MCP_DEBUG_BIND_PORT="$DPORT" \
-  GHIDRA_MCP_DEBUG_HOST="127.0.0.1" \
-  GHIDRA_MCP_DEBUG_PORT="19090" \
   GHIDRA_MCP_BINARY_PATH="$BINARY_ABS" \
   PWN_AUTOMATOR_CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-$(pwd)/test}" \
   PWN_AUTOMATOR_BINARY_PATH="$BINARY_ABS" \
@@ -199,18 +169,18 @@ wait_ready() {
   exit 1
 }
 
-echo "[info] Waiting for GDB Server (port $DPORT)..."
-wait_ready "debug_bridge" "$DPORT" "$(cat "$DBG_PID")"
-echo "[ok] GDB Server ready."
-
 echo "[info] Waiting for Pwntools MCP (port $PPORT)..."
 wait_ready "pwntools_mcp" "$PPORT" "$(cat "$PWN_PID")"
 echo "[ok] Pwntools MCP ready."
 
+echo "[info] Waiting for Pwno MCP (port $PWNO_PORT)..."
+wait_ready "pwno_mcp" "$PWNO_PORT" "$(cat "$PWNO_PID")" "$PWNO_READY_TIMEOUT"
+echo "[ok] Pwno MCP ready."
+
 echo "[info] Waiting for Ghidra Headless (port $HPORT)..."
 wait_ready "headless" "$HPORT" "$(cat "$HEADLESS_PID")" "$HEADLESS_READY_TIMEOUT"
 echo "[ok] Ghidra Headless ready."
-echo "[ok] debug_bridge pid=$(cat "$DBG_PID"), pwntools pid=$(cat "$PWN_PID"), headless pid=$(cat "$HEADLESS_PID")"
+echo "[ok] pwno pid=$(cat "$PWNO_PID"), pwntools pid=$(cat "$PWN_PID"), headless pid=$(cat "$HEADLESS_PID")"
 echo "[info] Services running. Press Ctrl+C to stop."
 
 wait

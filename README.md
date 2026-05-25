@@ -14,17 +14,18 @@ The dashboard follows an MVC structure:
 
 ```text
 Challenge Upload
+  -> MCP Setup
   -> Docker Build
   -> Container Start
   -> Inspect Runtime
   -> Codex Agent
        -> Ghidra MCP
-       -> GDB MCP
+       -> Pwno MCP
        -> Pwntools MCP
   -> Dataset Save
 ```
 
-MCP servers are external. The dashboard prepares the Codex prompt/profile and launches Codex, but it does not start MCP servers.
+When `Start Pipeline` is clicked, the dashboard refreshes the focused uploaded binary and auto-starts the MCP runtime (`Ghidra + Pwntools + pwno-mcp`) for that binary before Codex runs.
 
 ## Requirements
 
@@ -34,8 +35,9 @@ Required tools:
 
 - Node.js 20 or newer
 - Docker
+- git
 - Codex CLI installed and logged in inside WSL/Ubuntu
-- Python packages required by the MCP servers, such as `fastmcp` and `pwntools`
+- Python packages required by local MCP servers, such as `fastmcp` and `pwntools`
 - Ghidra unpacked under `mcps`
 
 Recommended Codex install inside WSL/Ubuntu:
@@ -52,6 +54,7 @@ If `which codex` points to `/mnt/c/...`, install Codex again inside WSL. Do not 
 
 ```bash
 cd /mnt/d/Coding/Projects/PwnAutomator
+git clone https://github.com/pwno-io/pwno-mcp.git mcps/pwno-mcp
 cd pwnable-dashboard
 npm install
 cp .env.example .env
@@ -65,14 +68,7 @@ Dashboard URL:
 http://localhost:3000
 ```
 
-After uploading a challenge from the dashboard, start MCP servers manually:
-
-```bash
-cd /mnt/d/Coding/Projects/PwnAutomator/mcps
-./run_ghidra_server.sh
-```
-
-Then click `Start Pipeline` in the dashboard.
+After uploading a challenge from the dashboard, click `Start Pipeline`.
 
 ## Active Workspace
 
@@ -109,10 +105,11 @@ Before Codex starts, the dashboard writes a Codex MCP profile:
 $CODEX_HOME/pwnautomator.config.toml
 ```
 
-That profile points Codex to:
+That profile includes:
 
 ```text
-mcps/ghidra_tools/wrapper.py
+mcps/ghidra_tools/wrapper.py   (Ghidra + Pwntools tools)
+http://127.0.0.1:5500/mcp      (pwno-mcp HTTP endpoint)
 ```
 
 The generated LLM input files are written to:
@@ -155,11 +152,11 @@ The default MCP ports are:
 
 ```text
 Ghidra MCP:   9999
-GDB MCP:      19090
 Pwntools MCP: 19191
+Pwno MCP:     5500
 ```
 
-Start all MCP services with:
+Start all MCP services manually (optional) with:
 
 ```bash
 cd mcps
@@ -221,6 +218,8 @@ CODEX_SYSTEM_PROMPT_FILE=guidline_docs/codex-system-prompt.md
 CODEX_PROMPT_MAX_BYTES=262144
 PWN_AUTOMATOR_TRACE_ENABLED=true
 PWN_AUTOMATOR_CHALLENGE_DIR=mcps/test
+PWN_AUTOMATOR_MCP_AUTOSTART=true
+PWN_AUTOMATOR_MCP_SERVER_SCRIPT=mcps/run_ghidra_server.sh
 UPLOAD_LIMIT_BYTES=209715200
 ```
 
@@ -231,6 +230,9 @@ CODEX_MCP_AUTOCONFIG=true
 CODEX_MCP_PROFILE=pwnautomator
 CODEX_MCP_SERVER_NAME=pwnautomator
 CODEX_MCP_WRAPPER=mcps/ghidra_tools/wrapper.py
+CODEX_PWNO_MCP_SERVER_NAME=pwno
+CODEX_PWNO_MCP_REPO=mcps/pwno-mcp
+CODEX_PWNO_MCP_DOCKER_IMAGE=pwno-mcp-local:latest
 ```
 
 MCP endpoint overrides:
@@ -238,15 +240,16 @@ MCP endpoint overrides:
 ```bash
 GHIDRA_HOST=127.0.0.1
 GHIDRA_PORT=9999
-GHIDRA_MCP_DEBUG_HOST=127.0.0.1
-GHIDRA_MCP_DEBUG_PORT=19090
 GHIDRA_MCP_PWN_HOST=127.0.0.1
 GHIDRA_MCP_PWN_PORT=19191
+PWNO_MCP_HOST=127.0.0.1
+PWNO_MCP_PORT=5500
 ```
 
 ## Runtime Notes
 
 If a matching challenge container is already running, the pipeline reuses it and skips Docker build/container start.
+Before each pipeline run, stale challenge containers and stale MCP runtime processes/containers are stopped.
 
 Container matching uses:
 
@@ -292,7 +295,7 @@ ss -ltnp | grep ':3000'
 Check MCP ports:
 
 ```bash
-ss -ltnp | grep -E ':(9999|19090|19191)'
+ss -ltnp | grep -E ':(9999|19191|5500)'
 ```
 
 If Codex reports a missing Linux optional dependency, reinstall it inside WSL:

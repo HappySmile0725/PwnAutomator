@@ -36,8 +36,7 @@ def handle_session_stop(args: Dict[str, Any]) -> Dict[str, Any]:
     return runtime.stop_session(session_id=session_id, kill=kill)
 
 
-def handle_session_list(args: Dict[str, Any]) -> Dict[str, Any]:
-    _ = args
+def handle_session_list(_: Dict[str, Any]) -> Dict[str, Any]:
     return runtime.list_sessions()
 
 

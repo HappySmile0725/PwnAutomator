@@ -15,6 +15,8 @@ const {
 const {
     ensureCodexMcpProfile,
     getCodexMcpProfileName,
+    PWNO_ENABLED_TOOLS,
+    WRAPPER_ENABLED_TOOLS,
     shouldConfigureCodexMcp
 } = require('./codexMcpProfile.service');
 
@@ -27,25 +29,26 @@ const mcpServers = [
     {
         name: 'Ghidra MCP',
         key: 'ghidra-mcp',
-        managedBy: 'external',
+        managedBy: 'dashboard',
         endpoint: mcpEndpoint('GHIDRA_HOST', 'GHIDRA_PORT', '127.0.0.1', 9999),
-        tools: ['help', 'meta', 'func_list', 'decompile_by_name', 'decompile_by_addr', 'search_str']
+        tools: WRAPPER_ENABLED_TOOLS
     },
     {
-        name: 'GDB MCP',
-        key: 'gdb-mcp',
-        managedBy: 'external',
-        endpoint: mcpEndpoint('GHIDRA_MCP_DEBUG_HOST', 'GHIDRA_MCP_DEBUG_PORT', '127.0.0.1', 19090),
-        tools: ['debug_open_current', 'debug_run', 'debug_regs', 'debug_mem', 'debug_context', 'debug_cmd']
+        name: 'Pwno MCP',
+        key: 'pwno-mcp',
+        managedBy: 'dashboard',
+        endpoint: mcpEndpoint('PWNO_MCP_HOST', 'PWNO_MCP_PORT', '127.0.0.1', 5500),
+        tools: PWNO_ENABLED_TOOLS
     },
     {
         name: 'Pwntools MCP',
         key: 'pwntools-mcp',
-        managedBy: 'external',
+        managedBy: 'dashboard',
         endpoint: mcpEndpoint('GHIDRA_MCP_PWN_HOST', 'GHIDRA_MCP_PWN_PORT', '127.0.0.1', 19191),
         tools: ['pwn_payload_write', 'pwn_payload_execute', 'pwn_session_poll', 'pwn_session_send']
     }
 ];
+const [ghidraMcp, pwnoMcp, pwntoolsMcp] = mcpServers;
 
 const writeJson = async (filePath, payload) => {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -178,13 +181,7 @@ const classifyCodexLogLevel = (line) => {
     return 'info';
 };
 
-const safeJson = (value) => {
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch (_) {
-        return String(value);
-    }
-};
+const toJson = (value) => JSON.stringify(value, null, 2);
 
 const parseJsonLine = (line) => {
     try {
@@ -194,8 +191,7 @@ const parseJsonLine = (line) => {
     }
 };
 
-const formatCodexEventForOutput = (line) => {
-    const event = parseJsonLine(line);
+const formatCodexEventForOutput = (line, event) => {
     if (!event) {
         return line;
     }
@@ -211,10 +207,10 @@ const formatCodexEventForOutput = (line) => {
         const status = item.status || (event.type === 'item.started' ? 'started' : 'completed');
         const parts = [`mcp: ${server}/${tool} ${status}`];
         if (event.type === 'item.started' && item.arguments && Object.keys(item.arguments).length > 0) {
-            parts.push(`args:\n${safeJson(item.arguments)}`);
+            parts.push(`args:\n${toJson(item.arguments)}`);
         }
         if (item.error) {
-            parts.push(`error:\n${safeJson(item.error)}`);
+            parts.push(`error:\n${toJson(item.error)}`);
         }
         return parts.join('\n');
     }
@@ -240,8 +236,7 @@ const formatCodexEventForOutput = (line) => {
     return `codex event: ${event.type || 'unknown'}`;
 };
 
-const traceCodexLine = ({ tracePath, runId, stream, line }) => {
-    const parsed = parseJsonLine(line);
+const traceCodexLine = ({ tracePath, runId, stream, line, parsed }) => {
     appendTraceEventSync(tracePath, {
         runId,
         source: 'codex',
@@ -335,12 +330,12 @@ const runCodexAgent = async (state, options = {}) => {
                 PWN_AUTOMATOR_TRACE_RUN_ID: state.runId || '',
                 CODEX_MCP_PROFILE: prepared.mcpProfile?.profileName || '',
                 CODEX_MCP_SERVER: prepared.mcpProfile?.serverName || '',
-                GHIDRA_HOST: mcpServers[0].endpoint.host,
-                GHIDRA_PORT: String(mcpServers[0].endpoint.port),
-                GHIDRA_MCP_DEBUG_HOST: mcpServers[1].endpoint.host,
-                GHIDRA_MCP_DEBUG_PORT: String(mcpServers[1].endpoint.port),
-                GHIDRA_MCP_PWN_HOST: mcpServers[2].endpoint.host,
-                GHIDRA_MCP_PWN_PORT: String(mcpServers[2].endpoint.port)
+                GHIDRA_HOST: ghidraMcp.endpoint.host,
+                GHIDRA_PORT: String(ghidraMcp.endpoint.port),
+                PWNO_MCP_HOST: pwnoMcp.endpoint.host,
+                PWNO_MCP_PORT: String(pwnoMcp.endpoint.port),
+                GHIDRA_MCP_PWN_HOST: pwntoolsMcp.endpoint.host,
+                GHIDRA_MCP_PWN_PORT: String(pwntoolsMcp.endpoint.port)
             },
             stdin: shouldPipePromptToStdin(args) ? prompt : null,
             signal: options.signal,
@@ -352,13 +347,15 @@ const runCodexAgent = async (state, options = {}) => {
                 text
             }),
             onLine: (stream, line) => {
+                const parsed = parseJsonLine(line);
                 traceCodexLine({
                     tracePath: prepared.trace.currentTracePath,
                     runId: state.runId,
                     stream,
-                    line
+                    line,
+                    parsed
                 });
-                const displayLine = formatCodexEventForOutput(line);
+                const displayLine = formatCodexEventForOutput(line, parsed);
                 if (displayLine) {
                     appendLog(classifyCodexLogLevel(line), `codex: ${displayLine}`);
                 }
@@ -416,8 +413,5 @@ const runCodexAgent = async (state, options = {}) => {
 };
 
 module.exports = {
-    buildCodexManifest,
-    mcpServers,
-    prepareCodexTask,
     runCodexAgent
 };

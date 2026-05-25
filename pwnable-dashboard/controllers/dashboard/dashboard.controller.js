@@ -81,7 +81,7 @@ const uploadChallenge = async (req, res) => {
     }
 };
 
-const showAi = async (req, res) => renderAi(res);
+const showAi = (req, res) => renderAi(res);
 
 const aiStatus = async (req, res) => {
     try {

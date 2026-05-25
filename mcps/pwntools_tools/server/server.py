@@ -18,36 +18,12 @@ DEFAULT_BIND_PORT = 19191
 DEFAULT_MAX_REQUEST_BYTES = 2 * 1024 * 1024
 
 
-def _parse_env_port(value: str | None, default: int) -> int:
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
     text = str(value if value is not None else "").strip()
     if text.isdigit():
         return int(text)
     return default
-
-
-def _parse_env_int(value: str | None, default: int) -> int:
-    text = str(value if value is not None else "").strip()
-    if text.isdigit():
-        return int(text)
-    return default
-
-
-def _get_default_host() -> str:
-    return os.environ.get("PWNTOOLS_MCP_BIND_HOST", DEFAULT_BIND_HOST)
-
-
-def _get_default_port() -> int:
-    return _parse_env_port(
-        os.environ.get("PWNTOOLS_MCP_BIND_PORT"),
-        DEFAULT_BIND_PORT,
-    )
-
-
-def _get_default_max_request_bytes() -> int:
-    return _parse_env_int(
-        os.environ.get("PWNTOOLS_MCP_MAX_REQUEST_BYTES"),
-        DEFAULT_MAX_REQUEST_BYTES,
-    )
 
 
 def _send_response(conn: socket.socket, payload: Dict[str, Any]) -> None:
@@ -76,7 +52,7 @@ def _help_payload() -> Dict[str, Any]:
         "pwn.payload.write": "write payload script to active challenge workspace hack.py {payload_content}",
         "pwn.payload.read": "read active challenge workspace hack.py {path?}",
         "pwn.payload.list": "list payload scripts in active challenge workspace",
-        "pwn.payload.execute": "execute active challenge workspace hack.py on current target binary {path?, pause_before_payload?, wait_ms?}",
+        "pwn.payload.execute": "execute active challenge workspace hack.py on current target binary {path?, wait_ms?}",
         "pwn.session.poll": "poll session output/status {session_id}",
         "pwn.session.send": "send stdin to session {session_id, data, append_newline?}",
         "pwn.session.continue": "resume pause() by sending newline {session_id}",
@@ -152,9 +128,9 @@ def run_server(host: str, port: int, max_request_bytes: int = DEFAULT_MAX_REQUES
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="pwntools MCP TCP server")
-    parser.add_argument("--host", default=_get_default_host())
-    parser.add_argument("--port", type=int, default=_get_default_port())
-    parser.add_argument("--max-request-bytes", type=int, default=_get_default_max_request_bytes())
+    parser.add_argument("--host", default=os.environ.get("PWNTOOLS_MCP_BIND_HOST", DEFAULT_BIND_HOST))
+    parser.add_argument("--port", type=int, default=_env_int("PWNTOOLS_MCP_BIND_PORT", DEFAULT_BIND_PORT))
+    parser.add_argument("--max-request-bytes", type=int, default=_env_int("PWNTOOLS_MCP_MAX_REQUEST_BYTES", DEFAULT_MAX_REQUEST_BYTES))
     return parser.parse_args()
 
 

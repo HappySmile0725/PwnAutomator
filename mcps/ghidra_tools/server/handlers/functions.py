@@ -50,9 +50,3 @@ class FunctionsHandler:
         if func:
             return _function_payload(func)
         return {"error": "No function at address"}
-
-COMMANDS = {
-    "func.list": FunctionsHandler.list_all,
-    "func.name": FunctionsHandler.get_by_name,
-    "func.addr": FunctionsHandler.get_by_addr,
-}

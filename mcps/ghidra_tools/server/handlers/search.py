@@ -171,12 +171,3 @@ class SearchHandler:
             })
         
         return result
-
-# handlers
-COMMANDS = {
-    "search.func": SearchHandler.func_by_pattern,
-    "search.str": SearchHandler.string,
-    "search.bytes": SearchHandler.bytes_pattern,
-    "search.xrefs_to": SearchHandler.xrefs_to,
-    "search.xrefs_from": SearchHandler.xrefs_from,
-}

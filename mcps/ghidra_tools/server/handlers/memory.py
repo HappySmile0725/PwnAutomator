@@ -124,10 +124,3 @@ class MemoryHandler:
             return {"error": "unable to decode instruction at %s: %s" % (_addr_hex(cur), str(exc))}
         
         return result
-
-COMMANDS = {
-    "mem.hex": MemoryHandler.read_hex,
-    "mem.dec": MemoryHandler.read_dec,
-    "mem.str": MemoryHandler.read_str,
-    "mem.asm": MemoryHandler.read_asm,
-}

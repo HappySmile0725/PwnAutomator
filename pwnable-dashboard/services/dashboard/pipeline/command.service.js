@@ -14,6 +14,24 @@ const applyTemplate = (value, variables) => Object.entries(variables || {}).redu
     return result.split(`{${key}}`).join(replacement == null ? '' : String(replacement));
 }, String(value || ''));
 
+const safeProcessKill = (pid, signal) => {
+    try {
+        process.kill(pid, signal);
+        return true;
+    } catch (_) {
+        return false;
+    }
+};
+
+const safeChildKill = (child, signal) => {
+    try {
+        child.kill(signal);
+        return true;
+    } catch (_) {
+        return false;
+    }
+};
+
 const terminateChild = (child, killTimeoutMs = 3000) => {
     if (!child?.pid || child.killed) {
         return;
@@ -24,26 +42,16 @@ const terminateChild = (child, killTimeoutMs = 3000) => {
         return;
     }
 
-    try {
-        process.kill(-child.pid, 'SIGTERM');
-    } catch (_) {
-        try {
-            child.kill('SIGTERM');
-        } catch (_) {
-            return;
-        }
+    if (!safeProcessKill(-child.pid, 'SIGTERM') && !safeChildKill(child, 'SIGTERM')) {
+        return;
     }
 
     setTimeout(() => {
         if (child.killed) {
             return;
         }
-        try {
-            process.kill(-child.pid, 'SIGKILL');
-        } catch (_) {
-            try {
-                child.kill('SIGKILL');
-            } catch (_) {}
+        if (!safeProcessKill(-child.pid, 'SIGKILL')) {
+            safeChildKill(child, 'SIGKILL');
         }
     }, killTimeoutMs).unref();
 };

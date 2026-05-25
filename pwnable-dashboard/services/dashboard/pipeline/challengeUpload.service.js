@@ -6,6 +6,7 @@ const AdmZip = require('adm-zip');
 const paths = require('./paths');
 const { appendLog, startUploadedRun } = require('./state.service');
 const { findDockerContext, resolveTrackingFiles } = require('./docker.service');
+const { stopManagedMcpRuntime } = require('./mcpRuntime.service');
 
 const activeWorkspaceDirs = [
     paths.uploadDir,
@@ -173,6 +174,7 @@ const handleChallengeUpload = async (req) => {
     }
 
     try {
+        await stopManagedMcpRuntime();
         await resetCurrentWorkspace();
 
         const savedFiles = await Promise.all(uploadFiles.map((file) => saveUploadedFile(file, paths.uploadDir)));

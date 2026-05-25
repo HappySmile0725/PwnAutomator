@@ -16,8 +16,6 @@ from typing import Any, Dict, List, Optional
 
 FIXED_PAYLOAD_FILENAME = "hack.py"
 TEMPLATE_IMPORT_LINE = "from pwn import *"
-TEMPLATE_PROCESS_LINE = "p = process('./chall')"
-TEMPLATE_ELF_LINE = "e = ELF('./chall', checksec=False)"
 TEMPLATE_INTERACTIVE_LINE = "p.interactive()"
 PID_LINE_REGEX = re.compile(r"\[MCP\]\[PID\]\s*([0-9]+)")
 MAX_BUFFER_BYTES = 1_000_000
@@ -237,7 +235,6 @@ class PwntoolsRuntime:
     def execute_payload(
         self,
         path: str,
-        pause_before_payload: bool = False,
         wait_ms: int = 300,
     ) -> Dict[str, Any]:
         try:
@@ -266,7 +263,6 @@ class PwntoolsRuntime:
             process, command = self._spawn_process(
                 payload_path=payload_path,
                 binary_path=target_binary,
-                pause_before_payload=bool(pause_before_payload),
             )
 
             session_id = uuid.uuid4().hex[:12]
@@ -403,17 +399,13 @@ class PwntoolsRuntime:
             raise ValueError("unknown session_id: %s" % key)
         return session
 
-    def _spawn_process(
-        self, payload_path: str, binary_path: str, pause_before_payload: bool
-    ) -> tuple[subprocess.Popen, List[str]]:
-        env = dict(os.environ)
-        _ = pause_before_payload
+    def _spawn_process(self, payload_path: str, binary_path: str) -> tuple[subprocess.Popen, List[str]]:
         python_exec = os.environ.get("PWNTOOLS_PYTHON", sys.executable)
         command = [python_exec, "-u", payload_path]
         process = subprocess.Popen(
             command,
             cwd=os.path.dirname(binary_path),
-            env=env,
+            env=os.environ,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -474,11 +466,10 @@ def list_payloads() -> Dict[str, Any]:
 
 
 def execute_payload(
-    path: str, pause_before_payload: bool = False, wait_ms: int = 300
+    path: str, wait_ms: int = 300
 ) -> Dict[str, Any]:
     return RUNTIME.execute_payload(
         path=path,
-        pause_before_payload=pause_before_payload,
         wait_ms=wait_ms,
     )
 

@@ -39,7 +39,6 @@ def _tool(
     description: str,
     properties: Dict[str, Any] | None = None,
     required: List[str] | None = None,
-    additional_properties: bool = False,
 ) -> Dict[str, Any]:
     return {
         "name": name,
@@ -48,7 +47,7 @@ def _tool(
             "type": "object",
             "properties": properties or {},
             "required": required or [],
-            "additionalProperties": additional_properties,
+            "additionalProperties": False,
         },
     }
 
@@ -56,7 +55,7 @@ def _tool(
 TOOLS: List[Dict[str, Any]] = [
     _tool(
         "ghidra_call",
-        "Call raw ghidra command by name (e.g. func.list, decompile.name, debug.open).",
+        "Call raw ghidra command by name (e.g. func.list, decompile.name).",
         properties={
             "cmd": {"type": "string", "description": "Command name (e.g. func.list)"},
             "args": {
@@ -182,248 +181,6 @@ TOOLS: List[Dict[str, Any]] = [
         required=["addr"],
     ),
     _tool(
-        "debug_open",
-        "Open dynamic debug session. Supports all debug.open args.",
-        properties={
-            "auto_run": {
-                "type": "boolean",
-                "description": "Run target immediately after open (default: false).",
-                "default": False,
-            }
-        },
-        additional_properties=True,
-    ),
-    _tool(
-        "debug_run",
-        "Run program (uses loaded executable, or resolves binary if missing).",
-        properties={
-            "session_id": {"type": "string"},
-            "input": {"type": "string", "description": "Optional stdin input for the program"},
-            "binary": {"type": "string", "description": "Optional explicit binary path override"},
-        },
-        required=[],
-        additional_properties=True,
-    ),
-    _tool(
-        "debug_open_current",
-        "Open dynamic debug session for current program. Supports all debug.open.current args.",
-        properties={
-            "auto_run": {
-                "type": "boolean",
-                "description": "Run target immediately after open (default: false).",
-                "default": False,
-            }
-        },
-        additional_properties=True,
-    ),
-    _tool(
-        "debug_attach",
-        "Attach dynamic debug session. Supports all debug.attach args.",
-        properties={"pid": {"type": "integer"}},
-        required=["pid"],
-        additional_properties=True,
-    ),
-    _tool(
-        "debug_close",
-        "Close dynamic debug session.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool("debug_list", "List debug sessions."),
-    _tool(
-        "debug_status",
-        "Get debug session status.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_break_set",
-        "Set breakpoint.",
-        properties={
-            "session_id": {"type": "string"},
-            "location": {"type": "string"},
-        },
-        required=["session_id", "location"],
-    ),
-    _tool(
-        "debug_break_del",
-        "Delete breakpoint.",
-        properties={
-            "session_id": {"type": "string"},
-            "breakpoint": {"type": "string"},
-        },
-        required=["session_id", "breakpoint"],
-    ),
-    _tool(
-        "debug_break_list",
-        "List breakpoints.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_cont",
-        "Continue execution.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_stepi",
-        "Single-step instruction.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_nexti",
-        "Step over instruction.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_interrupt",
-        "Interrupt execution.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_stdin_write",
-        "Write input to inferior stdin.",
-        properties={
-            "session_id": {"type": "string"},
-            "data": {"type": "string"},
-            "append_newline": {"type": "boolean", "default": False},
-            "wait_ms": {
-                "type": "integer",
-                "minimum": 0,
-                "default": 300,
-                "description": "Wait for target output/events after write (milliseconds).",
-            },
-            "max_events": {
-                "type": "integer",
-                "minimum": 1,
-                "default": 200,
-                "description": "Max events collected while waiting.",
-            },
-        },
-        required=["session_id", "data"],
-    ),
-    _tool(
-        "debug_regs",
-        "Read registers as hexadecimal values.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_mem",
-        "Read memory from debug session.",
-        properties={
-            "session_id": {"type": "string"},
-            "addr": {"type": "string"},
-            "size": {"type": "integer", "minimum": 1, "default": 64},
-        },
-        required=["session_id", "addr"],
-    ),
-    _tool(
-        "debug_bt",
-        "Get stack backtrace.",
-        properties={
-            "session_id": {"type": "string"},
-            "depth": {"type": "integer", "minimum": 1, "default": 32},
-        },
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_events_poll",
-        "Poll async debug events.",
-        properties={
-            "session_id": {"type": "string"},
-            "max": {"type": "integer", "minimum": 1, "default": 20},
-        },
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_context",
-        "Get comprehensive debug context (registers, code, stack) similar to Pwndbg.",
-        properties={"session_id": {"type": "string"}},
-        required=["session_id"],
-    ),
-    _tool(
-        "debug_cmd",
-        "Execute raw GDB command.",
-        properties={
-            "session_id": {"type": "string"},
-            "gdb_cmd": {"type": "string"},
-            "timeout_ms": {
-                "type": "integer",
-                "minimum": 0,
-                "default": 3000,
-                "description": "Shell-command timeout in milliseconds for `shell`/`!` commands.",
-            },
-        },
-        required=["session_id", "gdb_cmd"],
-    ),
-    _tool(
-        "debug_ropgadget_chall",
-        "Run ROPgadget --binary against the chall binary path or the currently loaded binary.",
-        properties={
-            "path": {
-                "type": "string",
-                "description": "Optional chall binary path override.",
-            },
-            "session_id": {
-                "type": "string",
-                "description": "Optional debug session id used to resolve the current binary.",
-            },
-            "timeout_ms": {
-                "type": "integer",
-                "minimum": 1,
-                "default": 30000,
-                "description": "ROPgadget timeout in milliseconds.",
-            },
-        },
-        required=[],
-    ),
-    _tool(
-        "debug_ropgadget_libc",
-        "Run ROPgadget --binary against libc. Defaults to a local challenge libc or /usr/lib/x86_64-linux-gnu/libc.so.6.",
-        properties={
-            "path": {
-                "type": "string",
-                "description": "Optional libc path override. If set, this takes precedence over `source`.",
-            },
-            "source": {
-                "type": "string",
-                "enum": ["local", "system"],
-                "description": "Optional libc source selection: `local` uses the active challenge workspace libc, `system` uses /usr/lib/x86_64-linux-gnu/libc.so.6.",
-            },
-            "timeout_ms": {
-                "type": "integer",
-                "minimum": 1,
-                "default": 30000,
-                "description": "ROPgadget timeout in milliseconds.",
-            },
-        },
-        required=[],
-    ),
-    _tool(
-        "debug_restart_server",
-        "Restart the GDB server process (kill and spawn new).",
-        properties={},
-        required=[],
-    ),
-    _tool(
-        "debug_read_stdout",
-        "Read stdout/stderr output from the inferior process.",
-        properties={
-            "max_bytes": {
-                "type": "integer",
-                "minimum": 1,
-                "default": 65536,
-                "description": "Maximum bytes to read from current PTY output buffer.",
-            }
-        },
-        required=[],
-    ),
-    _tool(
         "pwn_payload_write",
         "Create payload script with mandatory pwntools template (always writes hack.py).",
         properties={
@@ -450,7 +207,6 @@ TOOLS: List[Dict[str, Any]] = [
                 "type": "string",
                 "description": "Optional. Only active challenge workspace hack.py is accepted.",
             },
-            "pause_before_payload": {"type": "boolean", "default": False},
             "wait_ms": {
                 "type": "integer",
                 "minimum": 0,
@@ -512,31 +268,6 @@ TOOL_TO_COMMAND = {
     "search_bytes": "search.bytes",
     "search_xrefs_to": "search.xrefs_to",
     "search_xrefs_from": "search.xrefs_from",
-    "debug_open": "debug.open",
-    "debug_open_current": "debug.open.current",
-    "debug_run": "debug.run",
-    "debug_attach": "debug.attach",
-    "debug_close": "debug.close",
-    "debug_list": "debug.list",
-    "debug_status": "debug.status",
-    "debug_break_set": "debug.break.set",
-    "debug_break_del": "debug.break.del",
-    "debug_break_list": "debug.break.list",
-    "debug_cont": "debug.cont",
-    "debug_stepi": "debug.stepi",
-    "debug_nexti": "debug.nexti",
-    "debug_interrupt": "debug.interrupt",
-    "debug_stdin_write": "debug.stdin.write",
-    "debug_regs": "debug.regs",
-    "debug_mem": "debug.mem",
-    "debug_bt": "debug.bt",
-    "debug_events_poll": "debug.events.poll",
-    "debug_context": "debug.context",
-    "debug_cmd": "debug.cmd",
-    "debug_ropgadget_chall": "debug.ropgadget.chall",
-    "debug_ropgadget_libc": "debug.ropgadget.libc",
-    "debug_restart_server": "debug.restart_server",
-    "debug_read_stdout": "debug.read_stdout",
 }
 
 
@@ -660,30 +391,13 @@ class MCPServer:
             sys.stderr.flush()
 
     def _read_message(self) -> Dict[str, Any] | None:
-        # Primary mode: MCP stdio framing (Content-Length headers).
-        # Fallback mode: single-line JSON messages.
         while True:
             first = sys.stdin.buffer.readline()
             if first == b"":
                 return None
-
-            stripped = first.strip()
-            if stripped.startswith(b"{"):
-                parsed = self._parse_line_json(stripped)
-                if parsed is not None:
-                    return parsed
-                continue
-
             parsed = self._parse_framed_json(first)
             if parsed is not None:
                 return parsed
-
-    def _parse_line_json(self, stripped_line: bytes) -> Dict[str, Any] | None:
-        try:
-            return json.loads(stripped_line.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError) as exc:
-            self._log("failed to parse line-json request: %s" % str(exc))
-            return None
 
     def _parse_framed_json(self, first_header_line: bytes) -> Dict[str, Any] | None:
         headers: Dict[str, str] = {}

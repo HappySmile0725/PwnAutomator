@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node ./app.js",
-    "start:wsl": "HOST=${HOST:-0.0.0.0} PORT=${PORT:-3000} CODEX_AGENT_AUTORUN=${CODEX_AGENT_AUTORUN:-true} CODEX_AGENT_COMMAND=${CODEX_AGENT_COMMAND:-codex} CODEX_AGENT_MODEL=${CODEX_AGENT_MODEL:-gpt-5.3-codex} CODEX_MCP_AUTOCONFIG=${CODEX_MCP_AUTOCONFIG:-true} CODEX_MCP_PROFILE=${CODEX_MCP_PROFILE:-pwnautomator} CODEX_MCP_SERVER_NAME=${CODEX_MCP_SERVER_NAME:-pwnautomator} CODEX_MCP_WRAPPER=${CODEX_MCP_WRAPPER:-mcps/ghidra_tools/wrapper.py} CODEX_AGENT_ARGS=\"${CODEX_AGENT_ARGS:-exec --json -m ${CODEX_AGENT_MODEL:-gpt-5.3-codex} --profile-v2 ${CODEX_MCP_PROFILE:-pwnautomator} -}\" CODEX_AGENT_JSON_TRACE=${CODEX_AGENT_JSON_TRACE:-true} CODEX_SYSTEM_PROMPT_FILE=${CODEX_SYSTEM_PROMPT_FILE:-guidline_docs/codex-system-prompt.md} CODEX_PROMPT_MAX_BYTES=${CODEX_PROMPT_MAX_BYTES:-262144} PWN_AUTOMATOR_TRACE_ENABLED=${PWN_AUTOMATOR_TRACE_ENABLED:-true} node ./app.js"
+    "start:wsl": "bash ../scripts/start-dashboard-wsl.sh"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",

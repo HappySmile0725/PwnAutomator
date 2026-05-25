@@ -20,7 +20,6 @@ from memory import MemoryHandler
 from decompile import DecompileHandler
 from search import SearchHandler
 from meta import MetaHandler
-from debug import DebugHandler
 
 
 class ServerCommands:
@@ -55,33 +54,6 @@ class ServerCommands:
             # Meta
             "meta": MetaHandler.get_meta,
 
-            # Dynamic Debug
-            "debug.open": DebugHandler.open,
-            "debug.open.current": DebugHandler.open_current,
-            "debug.run": DebugHandler.run,
-            "debug.attach": DebugHandler.attach,
-            "debug.close": DebugHandler.close,
-            "debug.list": DebugHandler.list_sessions,
-            "debug.status": DebugHandler.status,
-            "debug.break.set": DebugHandler.break_set,
-            "debug.break.del": DebugHandler.break_del,
-            "debug.break.list": DebugHandler.break_list,
-            "debug.cont": DebugHandler.cont,
-            "debug.stepi": DebugHandler.stepi,
-            "debug.nexti": DebugHandler.nexti,
-            "debug.interrupt": DebugHandler.interrupt,
-            "debug.stdin.write": DebugHandler.stdin_write,
-            "debug.regs": DebugHandler.regs,
-            "debug.mem": DebugHandler.mem,
-            "debug.bt": DebugHandler.bt,
-            "debug.context": DebugHandler.context,
-            "debug.read_stdout": DebugHandler.read_stdout,
-            "debug.events.poll": DebugHandler.events_poll,
-            "debug.cmd": DebugHandler.cmd,
-            "debug.restart_server": DebugHandler.restart_server,
-            "debug.ropgadget.chall": DebugHandler.ropgadget_chall,
-            "debug.ropgadget.libc": DebugHandler.ropgadget_libc,
-
             "help": self.get_help
         })
         
@@ -105,31 +77,6 @@ class ServerCommands:
             "search.xrefs_to": "find xrefs to address {addr}",
             "search.xrefs_from": "find xrefs from address {addr}",
             "meta": "get binary metadata (includes checksec, ubuntu info, optional: {binary_path})",
-            "debug.open": "launch binary under gdb/mi {binary?, argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
-            "debug.open.current": "launch current program with gdb/mi {argv?, cwd?, env?, gdb_path?, gdb_args?, auto_run?}",
-            "debug.run": "run binary {session_id, input?, binary?}",
-            "debug.attach": "attach pid with gdb/mi {pid, gdb_path?, gdb_args?}",
-            "debug.close": "close debug session {session_id}",
-            "debug.list": "list debug sessions",
-            "debug.status": "session state {session_id}",
-            "debug.break.set": "set breakpoint {session_id, location}",
-            "debug.break.del": "delete breakpoint {session_id, breakpoint}",
-            "debug.break.list": "list breakpoints {session_id}",
-            "debug.cont": "continue execution {session_id}",
-            "debug.stepi": "step instruction {session_id}",
-            "debug.nexti": "next instruction {session_id}",
-            "debug.interrupt": "interrupt execution {session_id}",
-            "debug.stdin.write": "write input to inferior stdin {session_id, data, append_newline?, wait_ms?, max_events?}",
-            "debug.regs": "list register values in hex {session_id}",
-            "debug.mem": "read memory bytes {session_id, addr, size}",
-            "debug.bt": "stack backtrace {session_id, depth?}",
-            "debug.context": "context snapshot (registers/code/stack) {session_id}",
-            "debug.read_stdout": "read buffered stdout/stderr {max_bytes?}",
-            "debug.events.poll": "poll async debug events {session_id, max?}",
-            "debug.cmd": "execute raw gdb command {session_id, cmd, timeout_ms?}",
-            "debug.restart_server": "restart gdb server process",
-            "debug.ropgadget.chall": "run ROPgadget for chall binary {path?, session_id?, timeout_ms?}",
-            "debug.ropgadget.libc": "run ROPgadget for libc {path?, source?, timeout_ms?} (source: local|system, default: local challenge libc or /usr/lib/x86_64-linux-gnu/libc.so.6)",
             "help": "show help message"
         }
     

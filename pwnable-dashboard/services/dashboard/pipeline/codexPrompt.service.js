@@ -129,7 +129,7 @@ const buildRuntimeContext = ({ state, manifest, manifestPath, mcpServers }) => [
     '- Do not use shell commands or local CLI tools such as file, checksec, readelf, objdump, gdb, python scripts, or direct process execution for analysis.',
     '- If MCP tools are unavailable or return errors, stop and report the MCP blocker instead of falling back to non-MCP analysis.',
     '- Shell usage is only acceptable for saving final artifacts to the requested output paths when an MCP tool cannot write that artifact.',
-    '- MCP servers are external; do not start them from this task.'
+    '- MCP servers are started by the dashboard runtime; do not start or restart them from this task.'
 ].join('\n');
 
 const buildCodexPrompt = async ({ state, manifest, manifestPath, mcpServers }) => {
@@ -177,6 +177,5 @@ const buildCodexPrompt = async ({ state, manifest, manifestPath, mcpServers }) =
 };
 
 module.exports = {
-    buildCodexPrompt,
-    promptEnv
+    buildCodexPrompt
 };

@@ -15,10 +15,8 @@ const resolveRepoPath = (value, fallback) => {
 const challengeDir = resolveRepoPath(process.env.PWN_AUTOMATOR_CHALLENGE_DIR, path.join('mcps', 'test'));
 
 module.exports = {
-    appRoot,
     repoRoot,
     mcpDir,
-    dataDir,
     storageDir,
     nowDir,
     uploadDir: path.join(nowDir, 'upload'),
@@ -28,8 +26,6 @@ module.exports = {
     solutionDir: path.join(nowDir, 'solution'),
     datasetDir: path.join(nowDir, 'dataset'),
     traceDir: path.join(nowDir, 'trace'),
-    historyDir: path.join(storageDir, 'history'),
-    rootDatasetsDir: path.join(repoRoot, 'datasets'),
     rootRawDatasetDir: path.join(repoRoot, 'datasets', 'raw'),
     rootDatasetPackageDir: path.join(repoRoot, 'datasets', 'packages'),
     pipelineStatePath: path.join(dataDir, 'pipeline.json')

@@ -126,6 +126,9 @@ const removeContainerByName = async (containerName) => {
 };
 
 const normalizeContainerName = (value) => String(value || '').replace(/^\//, '');
+const isChallengeContainerName = (name) => normalizeContainerName(name).startsWith('pwnautomator-');
+const isRunningState = (state) => String(state || '').toLowerCase() === 'running';
+const listContainersSafe = (options) => dockerClient.listContainers(options).catch(() => []);
 
 const inspectContainerSafe = async (containerIdOrName) => {
     if (!containerIdOrName) {
@@ -158,6 +161,75 @@ const containerMatchesChallenge = (info, { runId, containerName, imageTag } = {}
         return true;
     }
     return false;
+};
+
+const listStaleCleanupCandidates = async () => {
+    const labelFiltered = await listContainersSafe({
+        all: true,
+        filters: JSON.stringify({ label: [`${CHALLENGE_ROLE_LABEL}=${CHALLENGE_ROLE}`] })
+    });
+    const nameFiltered = await listContainersSafe({
+        all: true,
+        filters: JSON.stringify({ name: ['pwnautomator-'] })
+    });
+
+    const merged = new Map();
+    for (const container of [...labelFiltered, ...nameFiltered]) {
+        if (container?.Id) {
+            merged.set(container.Id, container);
+        }
+    }
+    return Array.from(merged.values());
+};
+
+const stopStaleChallengeContainers = async ({ keepRunId, keepContainerName } = {}) => {
+    const keepName = normalizeContainerName(keepContainerName);
+    const containers = await listStaleCleanupCandidates();
+    const stale = [];
+
+    for (const container of containers) {
+        const labels = container.Labels || {};
+        const name = normalizeContainerName(container.Names?.[0] || '');
+        const isChallenge = labels[CHALLENGE_ROLE_LABEL] === CHALLENGE_ROLE || isChallengeContainerName(name);
+        if (!isChallenge) {
+            continue;
+        }
+
+        const runId = labels[CHALLENGE_RUN_LABEL];
+        if (keepRunId && runId && runId === keepRunId) {
+            continue;
+        }
+        if (keepName && name === keepName) {
+            continue;
+        }
+
+        stale.push({
+            id: container.Id,
+            name,
+            runId: runId || '',
+            wasRunning: isRunningState(container.State)
+        });
+    }
+
+    for (const containerInfo of stale) {
+        try {
+            const ref = containerInfo.id || containerInfo.name;
+            if (!ref) {
+                continue;
+            }
+            const container = dockerClient.getContainer(ref);
+            if (containerInfo.wasRunning) {
+                await container.stop({ t: 5 });
+            }
+            await container.remove({ force: true });
+        } catch (error) {
+            if (error?.statusCode !== 404) {
+                throw error;
+            }
+        }
+    }
+
+    return stale;
 };
 
 const findRunningChallengeContainer = async ({ runId, containerId, containerName, imageTag } = {}) => {
@@ -355,5 +427,6 @@ module.exports = {
     isContainerRunning,
     removeContainerByName,
     resolveTrackingFiles,
+    stopStaleChallengeContainers,
     startContainer
 };

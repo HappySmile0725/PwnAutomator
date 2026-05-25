@@ -6,8 +6,10 @@ const paths = require('./paths');
 
 const DEFAULT_PROFILE_NAME = 'pwnautomator';
 const DEFAULT_SERVER_NAME = 'pwnautomator';
+const DEFAULT_PWNO_SERVER_NAME = 'pwno';
 const DEFAULT_WRAPPER_PATH = path.join('mcps', 'ghidra_tools', 'wrapper.py');
-const DEFAULT_ENABLED_TOOLS = [
+
+const WRAPPER_ENABLED_TOOLS = [
     'ghidra_call',
     'help',
     'meta',
@@ -19,38 +21,13 @@ const DEFAULT_ENABLED_TOOLS = [
     'mem_str',
     'mem_asm',
     'disassemble_function',
-    'decompile_by_addr',
     'decompile_by_name',
+    'decompile_by_addr',
     'search_func',
     'search_str',
     'search_bytes',
     'search_xrefs_to',
     'search_xrefs_from',
-    'debug_open',
-    'debug_run',
-    'debug_open_current',
-    'debug_attach',
-    'debug_close',
-    'debug_list',
-    'debug_status',
-    'debug_break_set',
-    'debug_break_del',
-    'debug_break_list',
-    'debug_cont',
-    'debug_stepi',
-    'debug_nexti',
-    'debug_interrupt',
-    'debug_stdin_write',
-    'debug_regs',
-    'debug_mem',
-    'debug_bt',
-    'debug_events_poll',
-    'debug_context',
-    'debug_cmd',
-    'debug_ropgadget_chall',
-    'debug_ropgadget_libc',
-    'debug_restart_server',
-    'debug_read_stdout',
     'pwn_payload_write',
     'pwn_payload_read',
     'pwn_payload_list',
@@ -62,6 +39,45 @@ const DEFAULT_ENABLED_TOOLS = [
     'pwn_session_list'
 ];
 
+const PWNO_ENABLED_TOOLS = [
+    'create_debug_session',
+    'list_debug_sessions',
+    'close_debug_session',
+    'set_file',
+    'attach',
+    'gdb_poll',
+    'gdb_interrupt',
+    'finish',
+    'jump',
+    'return_from_function',
+    'until',
+    'set_breakpoint',
+    'get_session_info',
+    'run',
+    'step_control',
+    'get_context',
+    'get_memory',
+    'execute',
+    'run_command',
+    'spawn_process',
+    'get_process',
+    'kill_process',
+    'list_processes',
+    'execute_python_script',
+    'execute_python_code',
+    'install_python_packages',
+    'list_python_packages',
+    'fetch_repo',
+    'pwncli',
+    'sendinput',
+    'checkoutput',
+    'checkevents',
+    'pwncli_stop',
+    'list_pwncli_sessions',
+    'get_retdec_status',
+    'get_decompiled_code'
+];
+
 const enabled = (value, fallback = true) => {
     if (value === undefined) {
         return fallback;
@@ -69,9 +85,9 @@ const enabled = (value, fallback = true) => {
     return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
 };
 
-const resolveRepoPath = (value) => {
+const resolveRepoPath = (value, fallback) => {
     const raw = String(value || '').trim();
-    const target = raw || DEFAULT_WRAPPER_PATH;
+    const target = raw || fallback;
     return path.isAbsolute(target) ? path.resolve(target) : path.resolve(paths.repoRoot, target);
 };
 
@@ -83,10 +99,16 @@ const sanitizeName = (value, fallback) => {
     return name;
 };
 
+const localMcpHost = (host) => {
+    const value = String(host || '').trim();
+    if (!value || value === '0.0.0.0' || value === '::') {
+        return '127.0.0.1';
+    }
+    return value;
+};
+
 const tomlString = (value) => JSON.stringify(String(value ?? ''));
-
 const tomlArray = (values) => `[${values.map(tomlString).join(', ')}]`;
-
 const tomlInlineTable = (payload) => {
     const entries = Object.entries(payload)
         .filter(([, value]) => value !== undefined && value !== null)
@@ -95,33 +117,40 @@ const tomlInlineTable = (payload) => {
 };
 
 const codexHome = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-
 const getCodexMcpProfileName = () => sanitizeName(process.env.CODEX_MCP_PROFILE, DEFAULT_PROFILE_NAME);
-
 const shouldConfigureCodexMcp = () => enabled(process.env.CODEX_MCP_AUTOCONFIG, true);
 
-const buildMcpEnv = (state, mcpServers, trace) => ({
-    PYTHONDONTWRITEBYTECODE: '1',
-    GHIDRA_HOST: mcpServers[0].endpoint.host,
-    GHIDRA_PORT: String(mcpServers[0].endpoint.port),
-    GHIDRA_MCP_DEBUG_HOST: mcpServers[1].endpoint.host,
-    GHIDRA_MCP_DEBUG_PORT: String(mcpServers[1].endpoint.port),
-    GHIDRA_MCP_PWN_HOST: mcpServers[2].endpoint.host,
-    GHIDRA_MCP_PWN_PORT: String(mcpServers[2].endpoint.port),
-    PWN_AUTOMATOR_CHALLENGE_DIR: paths.challengeDir,
-    PWNTOOLS_MCP_CHALLENGE_DIR: paths.challengeDir,
-    PWN_AUTOMATOR_BINARY_PATH: state.challenge?.mcpWorkspace?.targetBinaryPath || '',
-    PWNTOOLS_MCP_BINARY_PATH: state.challenge?.mcpWorkspace?.targetBinaryPath || '',
-    PWN_AUTOMATOR_TRACE_ENABLED: process.env.PWN_AUTOMATOR_TRACE_ENABLED || 'true',
-    PWN_AUTOMATOR_TRACE_FILE: trace?.currentTracePath || '',
-    PWN_AUTOMATOR_TRACE_RUN_ID: state.runId || ''
-});
+const findEndpoint = (mcpServers, key, fallbackHost, fallbackPort) => {
+    const server = (mcpServers || []).find((item) => item?.key === key);
+    return {
+        host: server?.endpoint?.host || fallbackHost,
+        port: String(server?.endpoint?.port || fallbackPort)
+    };
+};
 
-const buildProfileToml = ({ state, mcpServers, serverName, wrapperPath, trace }) => {
+const buildMcpEnv = (state, mcpServers, trace) => {
+    const ghidra = findEndpoint(mcpServers, 'ghidra-mcp', '127.0.0.1', 9999);
+    const pwntools = findEndpoint(mcpServers, 'pwntools-mcp', '127.0.0.1', 19191);
+    return {
+        PYTHONDONTWRITEBYTECODE: '1',
+        GHIDRA_HOST: ghidra.host,
+        GHIDRA_PORT: ghidra.port,
+        GHIDRA_MCP_PWN_HOST: pwntools.host,
+        GHIDRA_MCP_PWN_PORT: pwntools.port,
+        PWN_AUTOMATOR_CHALLENGE_DIR: paths.challengeDir,
+        PWN_AUTOMATOR_BINARY_PATH: state.challenge?.mcpWorkspace?.targetBinaryPath || '',
+        PWN_AUTOMATOR_TRACE_ENABLED: process.env.PWN_AUTOMATOR_TRACE_ENABLED || 'true',
+        PWN_AUTOMATOR_TRACE_FILE: trace?.currentTracePath || '',
+        PWN_AUTOMATOR_TRACE_RUN_ID: state.runId || ''
+    };
+};
+
+const buildProfileToml = ({ state, mcpServers, serverName, pwnoServerName, wrapperPath, trace }) => {
     const disableIdaMcp = enabled(process.env.CODEX_MCP_DISABLE_IDA_MCP, true);
-    const sections = [
-        '# Generated by PwnAutomator. Do not edit while the dashboard is running.'
-    ];
+    const env = buildMcpEnv(state, mcpServers, trace);
+    const pwno = findEndpoint(mcpServers, 'pwno-mcp', '127.0.0.1', 5500);
+    const pwnoUrl = `http://${localMcpHost(pwno.host)}:${pwno.port}/mcp`;
+    const sections = ['# Generated by PwnAutomator. Do not edit while the dashboard is running.'];
 
     if (disableIdaMcp) {
         sections.push([
@@ -139,8 +168,16 @@ const buildProfileToml = ({ state, mcpServers, serverName, wrapperPath, trace })
         `cwd = ${tomlString(paths.repoRoot)}`,
         'enabled = true',
         'default_tools_approval_mode = "approve"',
-        `enabled_tools = ${tomlArray(DEFAULT_ENABLED_TOOLS)}`,
-        `env = ${tomlInlineTable(buildMcpEnv(state, mcpServers, trace))}`
+        `enabled_tools = ${tomlArray(WRAPPER_ENABLED_TOOLS)}`,
+        `env = ${tomlInlineTable(env)}`
+    ].join('\n'));
+
+    sections.push([
+        `[mcp_servers.${pwnoServerName}]`,
+        `url = ${tomlString(pwnoUrl)}`,
+        'enabled = true',
+        'default_tools_approval_mode = "approve"',
+        `enabled_tools = ${tomlArray(PWNO_ENABLED_TOOLS)}`
     ].join('\n'));
 
     return `${sections.join('\n\n')}\n`;
@@ -149,7 +186,8 @@ const buildProfileToml = ({ state, mcpServers, serverName, wrapperPath, trace })
 const ensureCodexMcpProfile = async (state, mcpServers, trace) => {
     const profileName = getCodexMcpProfileName();
     const serverName = sanitizeName(process.env.CODEX_MCP_SERVER_NAME, DEFAULT_SERVER_NAME);
-    const wrapperPath = resolveRepoPath(process.env.CODEX_MCP_WRAPPER);
+    const pwnoServerName = sanitizeName(process.env.CODEX_PWNO_MCP_SERVER_NAME, DEFAULT_PWNO_SERVER_NAME);
+    const wrapperPath = resolveRepoPath(process.env.CODEX_MCP_WRAPPER, DEFAULT_WRAPPER_PATH);
     const profilePath = path.join(codexHome(), `${profileName}.config.toml`);
 
     if (!shouldConfigureCodexMcp()) {
@@ -157,20 +195,27 @@ const ensureCodexMcpProfile = async (state, mcpServers, trace) => {
             enabled: false,
             profileName,
             serverName,
-            wrapperPath,
+            pwnoServerName,
             profilePath: null
         };
     }
 
     await fs.access(wrapperPath);
     await fs.mkdir(path.dirname(profilePath), { recursive: true });
-    await fs.writeFile(profilePath, buildProfileToml({ state, mcpServers, serverName, wrapperPath, trace }), 'utf8');
+    await fs.writeFile(profilePath, buildProfileToml({
+        state,
+        mcpServers,
+        serverName,
+        pwnoServerName,
+        wrapperPath,
+        trace
+    }), 'utf8');
 
     return {
         enabled: true,
         profileName,
         serverName,
-        wrapperPath,
+        pwnoServerName,
         profilePath
     };
 };
@@ -178,5 +223,7 @@ const ensureCodexMcpProfile = async (state, mcpServers, trace) => {
 module.exports = {
     ensureCodexMcpProfile,
     getCodexMcpProfileName,
+    PWNO_ENABLED_TOOLS,
+    WRAPPER_ENABLED_TOOLS,
     shouldConfigureCodexMcp
 };

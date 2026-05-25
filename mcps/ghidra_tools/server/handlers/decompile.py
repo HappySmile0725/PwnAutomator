@@ -50,7 +50,3 @@ class DecompileHandler:
         
         return {"error": "Function not found: %s" % name}
 
-COMMANDS = {
-    "decompile.addr": DecompileHandler.by_addr,
-    "decompile.name": DecompileHandler.by_name,
-}

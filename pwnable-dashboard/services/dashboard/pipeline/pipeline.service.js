@@ -1,10 +1,12 @@
 const path = require('path');
+const fs = require('fs').promises;
 
 const paths = require('./paths');
 const dockerService = require('./docker.service');
 const { runCodexAgent } = require('./codexAgent.service');
 const { inspectRuntime } = require('./runtimeInspect.service');
 const { saveDatasetPackage } = require('./dataset.service');
+const { setupManagedMcpRuntime, shouldAutoStartMcp } = require('./mcpRuntime.service');
 const { tracePathsForRun } = require('./trace.service');
 const {
     appendLog,
@@ -74,13 +76,76 @@ const buildRunDockerNames = (runId) => {
 
 const containerNameFromInfo = (info) => String(info?.Name || '').replace(/^\//, '');
 const currentContainerRef = (state) => state.docker?.containerId || state.docker?.containerName;
+const currentBinaryMarkerPath = () => path.join(paths.challengeMetaDir, 'current_binary');
 
-const ensureUploadedChallenge = (state) => {
+const challengeUploadError = (state) => {
     if (!state.challenge?.contextDir) {
-        throw new Error('Upload a challenge before starting the pipeline.');
+        return 'Upload a challenge before starting the pipeline.';
     }
     if (!state.challenge?.dockerfilePath) {
-        throw new Error('Dockerfile was not found in the uploaded challenge.');
+        return 'Dockerfile was not found in the uploaded challenge.';
+    }
+    return '';
+};
+
+const readCurrentBinaryMarker = async () => {
+    try {
+        const markerPath = currentBinaryMarkerPath();
+        const raw = await fs.readFile(markerPath, 'utf8');
+        const candidate = String(raw || '').trim();
+        if (!candidate) {
+            return '';
+        }
+        const resolved = path.resolve(candidate);
+        await fs.access(resolved);
+        return resolved;
+    } catch (_) {
+        return '';
+    }
+};
+
+const resolveChallengeBinaryFocus = async (challenge) => {
+    const markerBinary = await readCurrentBinaryMarker();
+    const contextDir = challenge?.contextDir || paths.challengeDir;
+    const dockerfilePath = challenge?.dockerfilePath || null;
+    const trackingFiles = dockerService.resolveTrackingFiles(dockerfilePath, contextDir);
+    const fallbackBinary = trackingFiles[0] ? path.resolve(contextDir, trackingFiles[0]) : '';
+    const targetBinaryPath = markerBinary || fallbackBinary;
+
+    if (targetBinaryPath) {
+        await fs.mkdir(paths.challengeMetaDir, { recursive: true });
+        await fs.writeFile(currentBinaryMarkerPath(), targetBinaryPath, 'utf8');
+    }
+
+    return { trackingFiles, targetBinaryPath };
+};
+
+const refreshChallengeFocus = async () => {
+    const state = readState();
+    const challenge = state.challenge || {};
+    const { trackingFiles, targetBinaryPath } = await resolveChallengeBinaryFocus(challenge);
+
+    patchState((current) => {
+        current.challenge = {
+            ...(current.challenge || {}),
+            trackingFiles,
+            mcpWorkspace: {
+                ...(current.challenge?.mcpWorkspace || {}),
+                runId: current.runId,
+                challengeDir: paths.challengeDir,
+                contextDir: current.challenge?.contextDir || paths.challengeDir,
+                dockerfilePath: current.challenge?.dockerfilePath || null,
+                trackingFiles,
+                targetBinaryPath,
+                updatedAt: new Date().toISOString()
+            }
+        };
+    });
+
+    if (targetBinaryPath) {
+        appendLog('info', `MCP focus binary: ${targetBinaryPath}`);
+    } else {
+        appendLog('warn', 'No focus binary resolved for MCP tools.');
     }
 };
 
@@ -187,6 +252,36 @@ const runRuntimeInspection = async () => {
     }
 };
 
+const runMcpSetupStage = async () => {
+    if (!shouldAutoStartMcp()) {
+        setStageStatus('mcp_setup', 'skipped', 'MCP autostart disabled');
+        appendLog('info', 'MCP autostart disabled. Skipping MCP setup.');
+        return;
+    }
+
+    const state = readState();
+    setStageStatus('mcp_setup', 'running', 'Starting MCP servers');
+    const runtime = await setupManagedMcpRuntime({
+        binaryPath: state.challenge?.mcpWorkspace?.targetBinaryPath || ''
+    });
+
+    patchState((current) => {
+        current.mcpRuntime = {
+            ...(current.mcpRuntime || {}),
+            enabled: runtime.enabled,
+            pid: runtime.pid,
+            scriptPath: runtime.scriptPath,
+            endpoints: runtime.endpoints,
+            readyAt: new Date().toISOString()
+        };
+    });
+    setStageStatus('mcp_setup', 'success', 'MCP servers ready');
+    const endpointSummary = (runtime.endpoints || [])
+        .map((endpoint) => `${endpoint.name}=${endpoint.host}:${endpoint.port}`)
+        .join(', ');
+    appendLog('info', `MCP runtime ready: ${endpointSummary}`);
+};
+
 const runCodexStage = async (signal) => {
     setStageStatus('codex_agent', 'running', 'Preparing Codex agent task');
     const result = await runCodexAgent(readState(), { signal });
@@ -226,7 +321,21 @@ const runDatasetSaveStage = async () => {
 const executePipeline = async (signal) => {
     try {
         const initialState = readState();
-        ensureUploadedChallenge(initialState);
+        const uploadError = challengeUploadError(initialState);
+        if (uploadError) {
+            throw new Error(uploadError);
+        }
+        const runDockerNames = buildRunDockerNames(initialState.runId);
+        const cleanedContainers = await dockerService.stopStaleChallengeContainers({
+            keepRunId: initialState.runId,
+            keepContainerName: runDockerNames.containerName
+        });
+        if (cleanedContainers.length > 0) {
+            appendLog('info', `Stopped stale challenge containers: ${cleanedContainers.map((item) => item.name || item.id).join(', ')}`);
+        }
+        await refreshChallengeFocus();
+        setRunStatus('running', 'mcp_setup');
+        await runMcpSetupStage();
         setRunStatus('running', 'docker_build');
 
         const reusedContainer = await applyExistingContainer(initialState);
@@ -260,10 +369,9 @@ const startPipeline = async () => {
         return withPipeline({ success: true, running: true });
     }
 
-    try {
-        ensureUploadedChallenge(readState());
-    } catch (error) {
-        return withPipeline({ success: false, error: error.message });
+    const error = challengeUploadError(readState());
+    if (error) {
+        return withPipeline({ success: false, error });
     }
 
     activeAbortController = new AbortController();

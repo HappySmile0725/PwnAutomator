@@ -3,6 +3,7 @@ const pipelineModel = require('../../../models/dashboard/pipeline.model');
 
 const STAGE_DEFINITIONS = [
     { key: 'challenge_upload', label: 'Challenge Upload' },
+    { key: 'mcp_setup', label: 'MCP Setup' },
     { key: 'docker_build', label: 'Docker Build' },
     { key: 'container_start', label: 'Container Start' },
     { key: 'inspect_runtime', label: 'Inspect Runtime' },
@@ -32,6 +33,7 @@ const createEmptyState = () => ({
     updatedAt: null,
     stages: cloneStageDefinitions(),
     challenge: null,
+    mcpRuntime: null,
     docker: null,
     runtime: null,
     codex: null,
@@ -130,6 +132,7 @@ const startUploadedRun = (runData) => {
     state.createdAt = timestamp;
     state.updatedAt = timestamp;
     state.challenge = runData.challenge;
+    state.mcpRuntime = null;
     state.docker = null;
     state.runtime = null;
     state.codex = null;
@@ -176,7 +179,6 @@ const getPipelineView = () => {
 };
 
 module.exports = {
-    STAGE_DEFINITIONS,
     appendLog,
     appendLogs,
     failCurrentStage,
@@ -185,6 +187,5 @@ module.exports = {
     setRunStatus,
     setStageStatus,
     startUploadedRun,
-    updateState,
-    writeState
+    updateState
 };
