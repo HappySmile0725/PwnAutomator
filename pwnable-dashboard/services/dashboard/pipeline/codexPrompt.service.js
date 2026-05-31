@@ -89,7 +89,8 @@ const compactValue = (value, fallback = '-') => {
 const formatMcpServers = (servers) => servers.map((server) => {
     const endpoint = `${server.endpoint.host}:${server.endpoint.port}`;
     const tools = Array.isArray(server.tools) ? server.tools.join(', ') : '-';
-    return `- ${server.name}: ${endpoint}; managed=${server.managedBy}; tools=${tools}`;
+    const serverId = server.codexServer || server.key || '-';
+    return `- ${server.name}: id=${serverId}; ${endpoint}; managed=${server.managedBy}; tools=${tools}`;
 }).join('\n');
 
 const buildPromptVariables = ({ state, manifest, manifestPath }) => ({
@@ -123,6 +124,7 @@ const buildRuntimeContext = ({ state, manifest, manifestPath, mcpServers }) => [
     formatMcpServers(mcpServers),
     '',
     '# Constraints',
+    '- When invoking MCP tools or listing resources/templates, use the exact MCP server id shown above (id=...), never the display name.',
     '- Use MCP tools for all challenge analysis: binary metadata, disassembly, decompilation, debugging, memory/register inspection, payload trials, and runtime behavior checks.',
     '- If active MCP tools are deferred or hidden, use tool discovery only to expose those MCP tools; do not use discovery output as challenge analysis.',
     '- Emit concise visible reasoning summaries before and after important MCP calls so the raw trace can capture why a tool was used and what was learned.',

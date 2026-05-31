@@ -148,6 +148,17 @@ const saveDatasetPackage = async (state) => {
         status: state.codex?.status || state.status || 'saved'
     });
 
+    const datasetPackage = await resolveDatasetPackagePath(state);
+    const packagePath = datasetPackage.packagePath;
+    const currentPackagePath = path.join(paths.datasetDir, 'dataset_package.zip');
+
+    const outputDir = path.join(paths.codexDir, 'dataset_extracted');
+    const traceSource = await firstExisting(rawTrace.rawDatasetPath, rawTrace.currentTracePath);
+    if (traceSource) {
+        const { spawnSync } = require('child_process');
+        spawnSync('python3', ['scripts/extract_dataset.py', traceSource, outputDir]);
+    }
+
     const zip = new AdmZip();
     const uploadedFiles = await addOriginalUploads(zip, state);
     const challengeWorkspaceAdded = await addChallengeWorkspaceZip(zip);
@@ -155,16 +166,27 @@ const saveDatasetPackage = async (state) => {
     const rawTraceFiles = await addRawTraceFiles(zip, rawTrace);
     const codexFiles = await addCodexFiles(zip);
 
-    const datasetPackage = await resolveDatasetPackagePath(state);
-    const packagePath = datasetPackage.packagePath;
-    const currentPackagePath = path.join(paths.datasetDir, 'dataset_package.zip');
+    const shareGptPath = path.join(outputDir, `${state.runId}_sharegpt.json`);
+    const discoveryShareGptPath = path.join(outputDir, `${state.runId}_discovery_sharegpt.json`);
+    const coderShareGptPath = path.join(outputDir, `${state.runId}_coder_sharegpt.json`);
+    const initialPath = path.join(outputDir, `${state.runId}_initial.json`);
+    const retryPath = path.join(outputDir, `${state.runId}_retry.json`);
+    const failuresPath = path.join(outputDir, `${state.runId}_failures.json`);
+
+    await addLocalFile(zip, shareGptPath, 'dataset_extracted/sharegpt.json');
+    await addLocalFile(zip, discoveryShareGptPath, 'dataset_extracted/discovery_sharegpt.json');
+    await addLocalFile(zip, coderShareGptPath, 'dataset_extracted/coder_sharegpt.json');
+    await addLocalFile(zip, initialPath, 'dataset_extracted/initial.json');
+    await addLocalFile(zip, retryPath, 'dataset_extracted/retry.json');
+    await addLocalFile(zip, failuresPath, 'dataset_extracted/failures.json');
 
     zip.writeZip(packagePath);
     if (packagePath !== currentPackagePath) {
-        await fs.copyFile(packagePath, currentPackagePath);
+        await fs.copyFile(packagePath, currentPackagePath).catch(() => {});
     }
 
-    const packageSize = (await fs.stat(packagePath)).size;
+    const stat = await fs.stat(packagePath).catch(() => null);
+    const packageSize = stat ? stat.size : 0;
 
     return {
         status: 'saved',

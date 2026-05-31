@@ -248,6 +248,21 @@ TOOLS: List[Dict[str, Any]] = [
     _tool("pwn_session_list", "List active payload sessions."),
 ]
 
+RESOURCES: List[Dict[str, Any]] = [
+    {
+        "uri": "meta",
+        "name": "meta",
+        "description": "Binary metadata via ghidra meta command.",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "help",
+        "name": "help",
+        "description": "Supported ghidra command help map.",
+        "mimeType": "application/json",
+    },
+]
+
 
 TOOL_TO_COMMAND = {
     "help": "help",
@@ -376,6 +391,7 @@ class MCPServer:
         self.verbose = bool(verbose)
         self.client = GhidraMCP(host=host, port=port)
         self.pwn_client = PwntoolsMCP(host=pwn_host, port=pwn_port, timeout=pwn_timeout)
+        self._jsonl_io = False
 
     def run(self) -> int:
         while True:
@@ -394,8 +410,21 @@ class MCPServer:
             first = sys.stdin.buffer.readline()
             if first == b"":
                 return None
+            raw = first.lstrip()
+            if raw.startswith((b"{", b"[")):
+                try:
+                    parsed = json.loads(first.decode("utf-8", errors="replace").strip())
+                except ValueError:
+                    self._log("failed to parse json line request")
+                    continue
+                if isinstance(parsed, dict):
+                    self._jsonl_io = True
+                    return parsed
+                self._log("json line request must be object")
+                continue
             parsed = self._parse_framed_json(first)
             if parsed is not None:
+                self._jsonl_io = False
                 return parsed
 
     def _parse_framed_json(self, first_header_line: bytes) -> Dict[str, Any] | None:
@@ -434,8 +463,13 @@ class MCPServer:
             return None
 
     def _write_message(self, obj: Dict[str, Any]) -> None:
-        # Claude Desktop MCP expects one JSON-RPC object per line on stdio.
-        payload = (json.dumps(obj, ensure_ascii=True, separators=(",", ":")) + "\n").encode("utf-8")
+        payload = json.dumps(obj, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        if self._jsonl_io:
+            sys.stdout.buffer.write(payload + b"\n")
+            sys.stdout.buffer.flush()
+            return
+        header = ("Content-Length: %d\r\n\r\n" % len(payload)).encode("ascii")
+        sys.stdout.buffer.write(header)
         sys.stdout.buffer.write(payload)
         sys.stdout.buffer.flush()
 
@@ -447,6 +481,29 @@ class MCPServer:
         if data is not None:
             err["data"] = data
         self._write_message({"jsonrpc": "2.0", "id": req_id, "error": err})
+
+    def _resource_payload(self, uri: str) -> Dict[str, Any]:
+        normalized = str(uri or "").strip()
+        if not normalized:
+            raise ValueError("uri is required")
+
+        if normalized == "meta":
+            binary_path = os.environ.get("PWN_AUTOMATOR_BINARY_PATH", "").strip()
+            data = self.client.call("meta", binary_path=binary_path)
+        elif normalized == "help":
+            data = self.client.call("help")
+        else:
+            raise ValueError("unknown resource uri: %s" % normalized)
+
+        return {
+            "contents": [
+                {
+                    "uri": normalized,
+                    "mimeType": "application/json",
+                    "text": _json_dump(data),
+                }
+            ]
+        }
 
     def _handle_request(self, req: Dict[str, Any]) -> None:
         method = req.get("method")
@@ -467,7 +524,7 @@ class MCPServer:
                     requested_version = DEFAULT_PROTOCOL_VERSION
                 result = {
                     "protocolVersion": requested_version,
-                    "capabilities": {"tools": {}},
+                    "capabilities": {"tools": {}, "resources": {}},
                     "serverInfo": {
                         "name": "ghidra-tools-wrapper",
                         "version": "0.1.0",
@@ -493,6 +550,22 @@ class MCPServer:
                 })
                 if req_id is not None:
                     self._send_result(req_id, {"tools": TOOLS})
+                return
+
+            if method == "resources/list":
+                if req_id is not None:
+                    self._send_result(req_id, {"resources": RESOURCES})
+                return
+
+            if method == "resources/templates/list":
+                if req_id is not None:
+                    self._send_result(req_id, {"resourceTemplates": []})
+                return
+
+            if method == "resources/read":
+                if req_id is not None:
+                    uri = params.get("uri")
+                    self._send_result(req_id, self._resource_payload(str(uri or "")))
                 return
 
             if method == "tools/call":
