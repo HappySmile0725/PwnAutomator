@@ -314,7 +314,7 @@ body {
 
 .button-row {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
     margin-bottom: 18px;
 }
@@ -345,6 +345,11 @@ body {
 .action-button.danger {
     border-color: rgba(255, 92, 112, 0.8);
     color: var(--red);
+}
+
+.action-button.continue {
+    border-color: rgba(74, 163, 255, 0.75);
+    color: var(--blue);
 }
 
 .action-button:disabled {

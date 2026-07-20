@@ -96,7 +96,7 @@ Codex autorun is enabled by default.
 Default command:
 
 ```bash
-codex exec --json -m gpt-5.3-codex --profile-v2 pwnautomator -
+codex exec --json -m gpt-5.5 --profile-v2 pwnautomator -
 ```
 
 Before Codex starts, the dashboard writes a Codex MCP profile:
@@ -109,7 +109,7 @@ That profile includes:
 
 ```text
 mcps/ghidra_tools/wrapper.py   (Ghidra + Pwntools tools)
-http://127.0.0.1:5500/mcp      (pwno-mcp HTTP endpoint)
+http://127.0.0.1:5601/mcp      (pwno-mcp HTTP endpoint)
 ```
 
 The generated LLM input files are written to:
@@ -153,7 +153,7 @@ The default MCP ports are:
 ```text
 Ghidra MCP:   9999
 Pwntools MCP: 19191
-Pwno MCP:     5500
+Pwno MCP:     5601
 ```
 
 Start all MCP services manually (optional) with:
@@ -193,12 +193,25 @@ pwnable-dashboard/data/storage/now/dataset/dataset_package.zip
 
 The package includes:
 
-- original uploaded files under `uploads/`
-- `challenge_workspace.zip`
-- exploit artifacts when present
-- `raw/codex_raw_trace.jsonl`
-- `codex/manifest.json`
-- `codex/codex_task.md`
+- `train/qwen3_coder_next_static_analysis_sft.jsonl`: static-analysis adapter data
+- `train/qwen3_coder_next_dynamic_analysis_sft.jsonl`: debugger-observed dynamic-analysis adapter data
+- `train/qwen3_coder_next_exploit_sft.jsonl`: one-candidate verified exploit adapter data
+- `train/qwen3_coder_next_repair_sft.jsonl`: before/after verified repair adapter data; it can be empty when a challenge is solved first try
+- `train/qwen3_coder_next_rlvr_seeds.jsonl`: online RLVR rollout seeds and reward contracts
+- quality, provenance, and training manifests under `metadata/`
+
+Each Qwen SFT row contains native `messages`, `tools`, and structured `tool_calls`. Render it with the tokenizer shipped with the checkpoint instead of manually adding tool XML:
+
+```python
+text = tokenizer.apply_chat_template(
+    row["messages"],
+    tools=row["tools"],
+    tokenize=False,
+)
+```
+
+Qwen3-Coder-Next is trained in non-thinking mode. Do not add `<think>` blocks or replace its bundled tokenizer/chat template.
+Mask loss to `assistant` messages only; tool responses are observations, not targets the model should generate. Train one LoRA adapter per task file and route them in `static -> dynamic -> exploit -> repair` order. Do not concatenate specialist files into a single adapter dataset.
 
 `dataset_draft.json` is not generated.
 
@@ -211,9 +224,13 @@ HOST=0.0.0.0
 PORT=3000
 CODEX_AGENT_AUTORUN=true
 CODEX_AGENT_COMMAND=codex
-CODEX_AGENT_MODEL=gpt-5.3-codex
-CODEX_AGENT_ARGS="exec --json -m gpt-5.3-codex --profile-v2 pwnautomator -"
+CODEX_AGENT_MODEL=gpt-5.5
+CODEX_LORA_ANALYSIS=gpt-5.5
+CODEX_LORA_DYNAMIC=gpt-5.5
+CODEX_LORA_CODER=gpt-5.5
+CODEX_AGENT_ARGS="exec --json -m {model} --profile-v2 pwnautomator -"
 CODEX_AGENT_JSON_TRACE=true
+CODEX_AGENT_SUCCESS_GRACE_MS=250
 CODEX_SYSTEM_PROMPT_FILE=guidline_docs/codex-system-prompt.md
 CODEX_PROMPT_MAX_BYTES=262144
 PWN_AUTOMATOR_TRACE_ENABLED=true
@@ -243,7 +260,7 @@ GHIDRA_PORT=9999
 GHIDRA_MCP_PWN_HOST=127.0.0.1
 GHIDRA_MCP_PWN_PORT=19191
 PWNO_MCP_HOST=127.0.0.1
-PWNO_MCP_PORT=5500
+PWNO_MCP_PORT=5601
 ```
 
 ## Runtime Notes
@@ -295,7 +312,7 @@ ss -ltnp | grep ':3000'
 Check MCP ports:
 
 ```bash
-ss -ltnp | grep -E ':(9999|19191|5500)'
+ss -ltnp | grep -E ':(9999|19191|5601)'
 ```
 
 If Codex reports a missing Linux optional dependency, reinstall it inside WSL:

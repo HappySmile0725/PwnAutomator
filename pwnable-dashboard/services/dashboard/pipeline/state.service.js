@@ -5,10 +5,10 @@ const paths = require('./paths');
 
 const STAGE_DEFINITIONS = [
     { key: 'challenge_upload', label: 'Challenge Upload' },
-    { key: 'mcp_setup', label: 'MCP Setup' },
     { key: 'docker_build', label: 'Docker Build' },
     { key: 'container_start', label: 'Container Start' },
     { key: 'inspect_runtime', label: 'Inspect Runtime' },
+    { key: 'mcp_setup', label: 'MCP Setup' },
     { key: 'codex_agent', label: 'Codex Agent' },
     { key: 'dataset_save', label: 'Dataset Save' }
 ];
@@ -26,9 +26,18 @@ const cloneStageDefinitions = () => STAGE_DEFINITIONS.map((stage, index) => ({
     completedAt: null
 }));
 
+const buildExecutionId = (runId, counter) => {
+    const base = String(runId || 'manual').trim() || 'manual';
+    const attempt = Number(counter) > 0 ? Number(counter) : 1;
+    return `${base}-exec${String(attempt).padStart(2, '0')}`;
+};
+
 const createEmptyState = () => ({
-    version: 1,
+    version: 2,
     runId: null,
+    executionId: null,
+    executionCounter: 0,
+    executionStartedAt: null,
     status: 'idle',
     currentStage: null,
     createdAt: null,
@@ -131,6 +140,36 @@ const setStageStatus = (key, status, detail) => updateState((state) => {
     return state;
 });
 
+const beginPipelineExecution = () => updateState((state) => {
+    const timestamp = nowIso();
+    const previousChallengeStage = state.stages.find((item) => item.key === 'challenge_upload');
+    const stages = cloneStageDefinitions();
+    const executionCounter = Math.max(0, Number(state.executionCounter) || 0) + 1;
+
+    stages[0] = {
+        ...stages[0],
+        status: previousChallengeStage?.status === 'success' ? 'success' : 'pending',
+        detail: previousChallengeStage?.detail || '',
+        startedAt: previousChallengeStage?.startedAt || null,
+        completedAt: previousChallengeStage?.completedAt || null
+    };
+
+    state.version = 2;
+    state.executionCounter = executionCounter;
+    state.executionId = buildExecutionId(state.runId, executionCounter);
+    state.executionStartedAt = timestamp;
+    state.status = 'uploaded';
+    state.currentStage = 'challenge_upload';
+    state.stages = stages;
+    state.mcpRuntime = null;
+    state.docker = null;
+    state.runtime = null;
+    state.codex = null;
+    state.dataset = null;
+    state.logs = [];
+    return state;
+});
+
 const startUploadedRun = (runData) => {
     const state = createEmptyState();
     const timestamp = nowIso();
@@ -183,6 +222,7 @@ const getPipelineView = () => {
 module.exports = {
     appendLog,
     appendLogs,
+    beginPipelineExecution,
     failCurrentStage,
     getPipelineView,
     readState,

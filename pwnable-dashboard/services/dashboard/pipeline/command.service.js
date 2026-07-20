@@ -38,6 +38,7 @@ const terminateChild = (child, killTimeoutMs = 3000) => {
     }
 
     if (process.platform === 'win32') {
+        safeChildKill(child, 'SIGTERM');
         spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
         return;
     }
@@ -56,7 +57,19 @@ const terminateChild = (child, killTimeoutMs = 3000) => {
     }, killTimeoutMs).unref();
 };
 
-const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, killTimeoutMs }) => new Promise((resolve, reject) => {
+const runCommand = ({
+    command,
+    args,
+    cwd,
+    env,
+    stdin,
+    onLine,
+    onData,
+    signal,
+    killTimeoutMs,
+    terminateAfterLine,
+    terminateAfterLineMs
+}) => new Promise((resolve, reject) => {
     const spawnOptions = {
         cwd,
         env: { ...process.env, ...(env || {}) },
@@ -67,7 +80,13 @@ const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, ki
     }
 
     let aborted = false;
+    let terminatedAfterLine = false;
+    let terminateTimer = null;
+    const lineBuffers = { stdout: '', stderr: '' };
     const child = spawn(command, args || [], spawnOptions);
+
+    child.stdout?.setEncoding?.('utf8');
+    child.stderr?.setEncoding?.('utf8');
 
     const abort = () => {
         aborted = true;
@@ -82,18 +101,50 @@ const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, ki
         }
     }
 
+    const scheduleTerminateAfterLine = (delayValue) => {
+        if (terminateTimer || !child?.pid) {
+            return;
+        }
+        const delay = Number.isFinite(Number(delayValue)) ? Number(delayValue) : 3000;
+        terminateTimer = setTimeout(() => {
+            terminatedAfterLine = true;
+            terminateChild(child, killTimeoutMs);
+        }, Math.max(0, delay));
+        terminateTimer.unref?.();
+    };
+
+    const emitLine = (level, line) => {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) {
+            return;
+        }
+        if (typeof onLine === 'function') {
+            onLine(level, trimmed);
+        }
+        if (typeof terminateAfterLine === 'function' && terminateAfterLine(level, trimmed)) {
+            const delay = typeof terminateAfterLineMs === 'function'
+                ? terminateAfterLineMs(level, trimmed)
+                : terminateAfterLineMs;
+            scheduleTerminateAfterLine(delay);
+        }
+    };
+
     const handleData = (level) => (chunk) => {
-        const text = chunk.toString();
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
 
         if (typeof onData === 'function') {
             onData(level, text);
         }
 
-        if (typeof onLine === 'function') {
-            const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-            for (const line of lines) {
-                onLine(level, line);
-            }
+        if (typeof onLine !== 'function' && typeof terminateAfterLine !== 'function') {
+            return;
+        }
+
+        lineBuffers[level] += text;
+        const lines = lineBuffers[level].split(/\r?\n/);
+        lineBuffers[level] = lines.pop() || '';
+        for (const line of lines) {
+            emitLine(level, line);
         }
     };
 
@@ -105,7 +156,12 @@ const runCommand = ({ command, args, cwd, env, stdin, onLine, onData, signal, ki
         if (signal) {
             signal.removeEventListener('abort', abort);
         }
-        resolve({ code, canceled: aborted });
+        emitLine('stdout', lineBuffers.stdout);
+        emitLine('stderr', lineBuffers.stderr);
+        if (terminateTimer) {
+            clearTimeout(terminateTimer);
+        }
+        resolve({ code, canceled: aborted, terminatedAfterLine });
     });
 
     if (stdin) {

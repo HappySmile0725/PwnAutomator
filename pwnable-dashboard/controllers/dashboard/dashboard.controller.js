@@ -55,13 +55,14 @@ const showDashboard = async (req, res) => {
 const hardwareStatus = async (req, res) => {
     try {
         return res.status(200).json(await hardwareService.getHardwareStatus());
-    } catch (error) {
+    } catch (_) {
         return res.status(500).json({ error: 'Unable to load hardware status.' });
     }
 };
 
 const uploadChallenge = async (req, res) => {
     try {
+        await pipelineService.stopActivePipelineForNewUpload();
         const result = await handleChallengeUpload(req);
         if (result.success) {
             return sendPipelineResponse(req, res, result);
@@ -99,6 +100,16 @@ const runPipeline = async (req, res) => {
     }
 };
 
+const continuePipeline = async (req, res) => {
+    try {
+        const result = await pipelineService.continuePipeline();
+        return sendPipelineResponse(req, res, result, result.success ? 202 : 400);
+    } catch (error) {
+        console.error('AI Continue Error:', error);
+        return sendError(req, res, 500, 'Pipeline Error', 'Internal server error during pipeline continuation.');
+    }
+};
+
 const cancelPipeline = async (req, res) => {
     try {
         const result = await pipelineService.cancelActivePipeline();
@@ -122,6 +133,7 @@ const saveDatasetPackage = async (req, res) => {
 module.exports = {
     aiStatus,
     cancelPipeline,
+    continuePipeline,
     hardwareStatus,
     runPipeline,
     saveDatasetPackage,

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -17,6 +18,8 @@ from typing import Any, Dict, List, Optional
 FIXED_PAYLOAD_FILENAME = "hack.py"
 TEMPLATE_IMPORT_LINE = "from pwn import *"
 TEMPLATE_INTERACTIVE_LINE = "p.interactive()"
+LIBC_FILENAME = "libc.so.6"
+LIBC_NAME_REGEX = re.compile(r"^libc(?:[-_.A-Za-z0-9]*)?\.so(?:\.\d+)*$", re.I)
 PID_LINE_REGEX = re.compile(r"\[MCP\]\[PID\]\s*([0-9]+)")
 MAX_BUFFER_BYTES = 1_000_000
 
@@ -38,6 +41,21 @@ TEST_DIR = _resolve_challenge_dir()
 FIXED_PAYLOAD_PATH = os.path.join(TEST_DIR, FIXED_PAYLOAD_FILENAME)
 DEFAULT_BINARY_NAME = os.environ.get("PWN_AUTOMATOR_BINARY_NAME", "chall")
 DEFAULT_BINARY_PATH = os.path.join(TEST_DIR, DEFAULT_BINARY_NAME)
+
+
+def _remote_host() -> str:
+    return os.environ.get("PWN_AUTOMATOR_REMOTE_HOST", "").strip()
+
+
+def _remote_port() -> int:
+    try:
+        return int(os.environ.get("PWN_AUTOMATOR_REMOTE_PORT", "0"))
+    except ValueError:
+        return 0
+
+
+def _remote_enabled() -> bool:
+    return bool(_remote_host() and _remote_port() > 0)
 
 
 def _ok(**kwargs: Any) -> Dict[str, Any]:
@@ -67,6 +85,22 @@ def _normalize_payload_body(payload_content: str) -> str:
     return content.rstrip()
 
 
+def _payload_policy_issues(payload_content: str) -> List[str]:
+    body = _normalize_payload_body(payload_content)
+    issues: List[str] = []
+    if "/workspace/" in body:
+        issues.append("do not hardcode /workspace paths; use the wrapper-provided e object or ./<active binary>")
+    if re.search(r"\b(?:remote|process)\s*\(", body):
+        issues.append("do not create tubes; use the wrapper-provided remote p tube")
+    if re.search(r"\.interactive\s*\(|\.close\s*\(", body):
+        issues.append("do not manage wrapper tube lifetime")
+    if re.search(r"(?m)^\s*def\s+exploit\s*\(", body):
+        without_definition = re.sub(r"(?m)^\s*def\s+exploit\s*\([^\n]*\):\s*$", "", body)
+        if not re.search(r"(?m)^\s*exploit\s*\(", without_definition):
+            issues.append("defined exploit(...) but never called it; call exploit(p) at top level")
+    return issues
+
+
 def _is_plain_filename(text: str) -> bool:
     return "/" not in text and "\\" not in text and not os.path.isabs(text)
 
@@ -90,6 +124,38 @@ def _default_binary_path() -> str:
         pass
 
     return os.path.abspath(DEFAULT_BINARY_PATH)
+
+
+def _payload_cwd(binary_path: str) -> str:
+    return os.path.dirname(os.path.abspath(binary_path)) or TEST_DIR
+
+
+def _find_challenge_libc(binary_path: str) -> str:
+    configured = os.environ.get("PWN_AUTOMATOR_LIBC_PATH")
+    if configured and os.path.isfile(configured):
+        return os.path.abspath(configured)
+
+    binary_dir = _payload_cwd(binary_path)
+    direct = os.path.join(binary_dir, LIBC_FILENAME)
+    if os.path.isfile(direct):
+        return direct
+
+    for root, dirs, files in os.walk(TEST_DIR):
+        dirs[:] = [name for name in dirs if name not in {".git", "__MACOSX", "node_modules", ".pwnautomator", "solution"}]
+        for name in files:
+            if LIBC_NAME_REGEX.match(name):
+                return os.path.join(root, name)
+    return ""
+
+
+def _ensure_payload_libc(binary_path: str) -> str:
+    source = _find_challenge_libc(binary_path)
+    if not source:
+        return ""
+    target = os.path.join(_payload_cwd(binary_path), LIBC_FILENAME)
+    if os.path.normcase(os.path.abspath(source)) != os.path.normcase(os.path.abspath(target)):
+        shutil.copy2(source, target)
+    return target
 
 
 def _resolve_payload_path(path_or_name: str) -> str:
@@ -127,10 +193,19 @@ def _resolve_payload_path(path_or_name: str) -> str:
 def render_payload_template(payload_content: str, binary_path: str | None = None) -> str:
     body = _normalize_payload_body(payload_content)
     binary_name = os.path.basename(binary_path or _default_binary_path()) or DEFAULT_BINARY_NAME
+    if _remote_enabled():
+        tube_line = (
+            "p = remote(os.environ['PWN_AUTOMATOR_REMOTE_HOST'], "
+            "int(os.environ['PWN_AUTOMATOR_REMOTE_PORT']))"
+        )
+    else:
+        tube_line = "p = process('./%s')" % binary_name
     lines = [
         TEMPLATE_IMPORT_LINE,
-        "p = process('./%s')" % binary_name,
+        "import os",
+        tube_line,
         "e = ELF('./%s', checksec=False)" % binary_name,
+        "libc = ELF('./%s', checksec=False) if os.path.exists('./%s') else e.libc" % (LIBC_FILENAME, LIBC_FILENAME),
         "",
         body,
         "",
@@ -145,7 +220,8 @@ def is_template_payload(text: str) -> bool:
         TEMPLATE_IMPORT_LINE,
         TEMPLATE_INTERACTIVE_LINE,
     )
-    return all(token in data for token in required) and "process('./" in data and "ELF('./" in data
+    has_tube = "process('./" in data or "remote(os.environ['PWN_AUTOMATOR_REMOTE_HOST']" in data
+    return all(token in data for token in required) and has_tube and "ELF('./" in data
 
 
 def extract_payload_body(text: str) -> str:
@@ -155,9 +231,11 @@ def extract_payload_body(text: str) -> str:
     offset = 0
     for line in data.splitlines():
         offset += len(line) + 1
-        if line.startswith("e = ELF("):
+        if line.startswith("libc = "):
             start = offset
             break
+        if line.startswith("e = ELF("):
+            start = offset
     end = data.rfind(suffix)
     if start < 0 or end < 0 or end <= start:
         return ""
@@ -189,6 +267,10 @@ class PwntoolsRuntime:
             os.makedirs(TEST_DIR, exist_ok=True)
             output_path = os.path.abspath(FIXED_PAYLOAD_PATH)
             target_binary = _default_binary_path()
+            policy_issues = _payload_policy_issues(payload_content)
+            if policy_issues:
+                return _error("payload policy violation", issues=policy_issues)
+            libc_path = _ensure_payload_libc(target_binary)
             script = render_payload_template(payload_content, binary_path=target_binary)
             with open(output_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(script)
@@ -196,6 +278,7 @@ class PwntoolsRuntime:
                 path=output_path,
                 filename=FIXED_PAYLOAD_FILENAME,
                 target_binary_default=target_binary,
+                libc_path=libc_path,
             )
         except Exception as exc:
             return _error(str(exc))
@@ -250,8 +333,10 @@ class PwntoolsRuntime:
                     path=payload_path,
                     expected_lines=[
                         TEMPLATE_IMPORT_LINE,
-                        "p = process('./<active binary>')",
+                        "import os",
+                        "p = remote(<published docker host>, <published docker port>)",
                         "e = ELF('./<active binary>', checksec=False)",
+                        "libc = ELF('./libc.so.6', checksec=False) if available, else e.libc",
                         TEMPLATE_INTERACTIVE_LINE,
                     ],
                 )

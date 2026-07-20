@@ -79,6 +79,10 @@
                         <span class="button-icon">RUN</span>
                         <span>Start Pipeline</span>
                     </button>
+                    <button class="action-button continue" id="continue-btn" type="button" disabled>
+                        <span class="button-icon">CONT</span>
+                        <span>Continue</span>
+                    </button>
                     <button class="action-button danger" id="cancel-btn" type="button" disabled>
                         <span class="button-icon">STOP</span>
                         <span>Cancel LLM</span>
@@ -153,6 +157,7 @@
         const uploadForm = document.getElementById('upload-form');
         const uploadFileName = document.getElementById('upload-file-name');
         const runButton = document.getElementById('run-btn');
+        const continueButton = document.getElementById('continue-btn');
         const cancelButton = document.getElementById('cancel-btn');
         const datasetButton = document.getElementById('dataset-btn');
         const statusPill = document.getElementById('pipeline-status');
@@ -170,6 +175,9 @@
         let lastOutputKey = '';
 
         const formatStatus = (value) => String(value || 'idle').replace(/_/g, ' ');
+
+        const outputIncludes = (data, needle) => Array.isArray(data.output)
+            && data.output.some((line) => String(line || '').includes(needle));
 
         const setBusy = (button, busy) => {
             button.disabled = busy;
@@ -268,9 +276,16 @@
 
             const running = data.status === 'running';
             const codexRunning = running && data.currentStage === 'codex_agent';
+            const codexCompleted = data.codex?.status === 'success'
+                || data.canSaveDataset === true
+                || (
+                    outputIncludes(data, 'codex turn completed')
+                    && outputIncludes(data, 'pwn_payload_write completed')
+                );
             setBusy(runButton, running);
+            continueButton.disabled = running || data.canContinue !== true;
             cancelButton.disabled = !codexRunning;
-            datasetButton.disabled = running;
+            datasetButton.disabled = !codexCompleted;
         };
 
         const requestPipeline = async (url, options = {}) => {
@@ -311,6 +326,16 @@
             } catch (error) {
                 renderOutput([error.message]);
                 setBusy(runButton, false);
+            }
+        });
+
+        continueButton.addEventListener('click', async () => {
+            setBusy(continueButton, true);
+            try {
+                await requestPipeline('/dashboard/ai/continue', { method: 'POST' });
+            } catch (error) {
+                renderOutput([error.message]);
+                setBusy(continueButton, false);
             }
         });
 

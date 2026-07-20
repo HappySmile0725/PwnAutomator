@@ -7,9 +7,11 @@ const { spawn } = require('child_process');
 const paths = require('./paths');
 
 const DEFAULT_RUNTIME_SCRIPT = path.join('mcps', 'run_ghidra_server.sh');
-const DEFAULT_READY_TIMEOUT_MS = 180000;
+const DEFAULT_READY_TIMEOUT_MS = 480000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const DEFAULT_STOP_TIMEOUT_MS = 5000;
+const DEFAULT_LOG_TAIL_BYTES = 16384;
+const DEFAULT_LOG_TAIL_LINES = 30;
 
 const runtimeStatePath = path.join(paths.challengeMetaDir, 'mcp_runtime.json');
 const runtimeStdoutPath = path.join(paths.challengeMetaDir, 'mcp_runtime.out.log');
@@ -63,11 +65,13 @@ const configuredEndpoints = () => ([
     {
         name: 'pwno-mcp',
         host: localHost(process.env.PWNO_MCP_HOST || '127.0.0.1'),
-        port: parsePort(process.env.PWNO_MCP_PORT, 5500)
+        port: parsePort(process.env.PWNO_MCP_PORT, 5601)
     }
 ]);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const compactWhitespace = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
 const isProcessAlive = (pid) => {
     if (!Number.isInteger(pid) || pid <= 0) {
@@ -110,6 +114,98 @@ const writeRuntimeState = async (payload) => {
 
 const clearRuntimeState = async () => {
     await fsp.rm(runtimeStatePath, { force: true });
+};
+
+const readLogTail = async (filePath, maxBytes = DEFAULT_LOG_TAIL_BYTES) => {
+    if (!filePath) {
+        return '';
+    }
+
+    let handle;
+    try {
+        const stat = await fsp.stat(filePath);
+        const start = Math.max(0, stat.size - maxBytes);
+        const length = Math.max(0, stat.size - start);
+        if (length === 0) {
+            return '';
+        }
+
+        const buffer = Buffer.alloc(length);
+        handle = await fsp.open(filePath, 'r');
+        await handle.read(buffer, 0, length, start);
+        return buffer.toString('utf8');
+    } catch (_) {
+        return '';
+    } finally {
+        await handle?.close().catch(() => {});
+    }
+};
+
+const tailLines = (value, limit = DEFAULT_LOG_TAIL_LINES) => String(value || '')
+    .split(/\r?\n/)
+    .map((line) => compactWhitespace(line))
+    .filter(Boolean)
+    .slice(-limit);
+
+const lastMeaningfulLine = (value) => tailLines(value, 1)[0] || '';
+
+const formatLogPath = (filePath) => {
+    if (!filePath) {
+        return '';
+    }
+    const relative = path.relative(paths.repoRoot, filePath);
+    if (!relative || relative.startsWith('..')) {
+        return filePath;
+    }
+    return relative;
+};
+
+const pendingEndpointSummary = async (endpoints) => {
+    const pending = [];
+    for (const endpoint of endpoints) {
+        const ok = await canConnect(endpoint.host, endpoint.port);
+        if (!ok) {
+            pending.push(`${endpoint.name}(${endpoint.host}:${endpoint.port})`);
+        }
+    }
+    return pending;
+};
+
+const buildRuntimeFailureMessage = async ({ reason, endpoints, stdoutPath, stderrPath }) => {
+    const [pending, stdoutTail, stderrTail] = await Promise.all([
+        pendingEndpointSummary(endpoints),
+        readLogTail(stdoutPath),
+        readLogTail(stderrPath)
+    ]);
+    const excerpt = lastMeaningfulLine(stderrTail) || lastMeaningfulLine(stdoutTail);
+    const logPaths = [formatLogPath(stdoutPath), formatLogPath(stderrPath)].filter(Boolean).join(', ');
+    const parts = [reason];
+
+    if (pending.length > 0) {
+        parts.push(`pending=${pending.join(', ')}`);
+    }
+    if (excerpt) {
+        parts.push(`last_log=${excerpt}`);
+    }
+    if (logPaths) {
+        parts.push(`logs=${logPaths}`);
+    }
+
+    return parts.join(' | ');
+};
+
+const runtimeExited = (pid) => Number.isInteger(pid) && pid > 0 && !isProcessAlive(pid);
+
+const throwIfRuntimeExited = async ({ pid, endpoints, stdoutPath, stderrPath }) => {
+    if (!runtimeExited(pid)) {
+        return;
+    }
+    throw new Error(await buildRuntimeFailureMessage({
+        reason: 'MCP runtime exited before readiness',
+        endpoints,
+        stdoutPath,
+        stderrPath
+    }));
 };
 
 const terminateProcess = async (pid, timeoutMs = DEFAULT_STOP_TIMEOUT_MS) => {
@@ -172,9 +268,12 @@ const canConnect = (host, port, timeoutMs = 800) => new Promise((resolve) => {
     socket.connect(port, host);
 });
 
-const waitForEndpoints = async (endpoints, timeoutMs) => {
+const waitForEndpoints = async (endpoints, timeoutMs, { pid, stdoutPath, stderrPath } = {}) => {
     const deadline = Date.now() + timeoutMs;
+    const guardRuntime = () => throwIfRuntimeExited({ pid, endpoints, stdoutPath, stderrPath });
+
     while (Date.now() < deadline) {
+        await guardRuntime();
         const checks = await Promise.all(endpoints.map(async (endpoint) => ({
             endpoint,
             ok: await canConnect(endpoint.host, endpoint.port)
@@ -182,26 +281,32 @@ const waitForEndpoints = async (endpoints, timeoutMs) => {
         if (checks.every((item) => item.ok)) {
             return;
         }
+
+        await guardRuntime();
         await sleep(DEFAULT_POLL_INTERVAL_MS);
     }
 
-    const pending = [];
-    for (const endpoint of endpoints) {
-        const ok = await canConnect(endpoint.host, endpoint.port);
-        if (!ok) {
-            pending.push(`${endpoint.name}(${endpoint.host}:${endpoint.port})`);
-        }
+    await guardRuntime();
+    const pending = await pendingEndpointSummary(endpoints);
+    const logPaths = [formatLogPath(stdoutPath), formatLogPath(stderrPath)].filter(Boolean).join(', ');
+    const parts = [`MCP runtime readiness timeout: ${pending.join(', ') || 'unknown'}`];
+    if (logPaths) {
+        parts.push(`logs=${logPaths}`);
     }
-    throw new Error(`MCP runtime readiness timeout: ${pending.join(', ') || 'unknown'}`);
+    throw new Error(parts.join(' | '));
 };
 
-const startManagedMcpRuntime = async ({ binaryPath } = {}) => {
+const startManagedMcpRuntime = async ({
+    binaryPath,
+    remoteHost = '',
+    remotePort = ''
+} = {}) => {
     const scriptPath = runtimeScriptPath();
     await fsp.access(scriptPath);
     await fsp.mkdir(paths.challengeMetaDir, { recursive: true });
 
-    const stdoutFd = fs.openSync(runtimeStdoutPath, 'a');
-    const stderrFd = fs.openSync(runtimeStderrPath, 'a');
+    const stdoutFd = fs.openSync(runtimeStdoutPath, 'w');
+    const stderrFd = fs.openSync(runtimeStderrPath, 'w');
     try {
         const args = [scriptPath];
         const targetBinaryPath = String(binaryPath || '').trim();
@@ -214,7 +319,9 @@ const startManagedMcpRuntime = async ({ binaryPath } = {}) => {
             env: {
                 ...process.env,
                 PWN_AUTOMATOR_CHALLENGE_DIR: paths.challengeDir,
-                PWN_AUTOMATOR_BINARY_PATH: targetBinaryPath
+                PWN_AUTOMATOR_BINARY_PATH: targetBinaryPath,
+                PWN_AUTOMATOR_REMOTE_HOST: String(remoteHost || ''),
+                PWN_AUTOMATOR_REMOTE_PORT: String(remotePort || '')
             },
             detached: process.platform !== 'win32',
             windowsHide: process.platform === 'win32',
@@ -231,26 +338,35 @@ const startManagedMcpRuntime = async ({ binaryPath } = {}) => {
             scriptPath,
             startedAt: new Date().toISOString(),
             binaryPath: targetBinaryPath,
-            challengeDir: paths.challengeDir
+            remoteHost,
+            remotePort,
+            challengeDir: paths.challengeDir,
+            stdoutPath: runtimeStdoutPath,
+            stderrPath: runtimeStderrPath
         });
 
-        return { pid: child.pid, scriptPath };
+        return {
+            pid: child.pid,
+            scriptPath,
+            stdoutPath: runtimeStdoutPath,
+            stderrPath: runtimeStderrPath
+        };
     } finally {
         fs.closeSync(stdoutFd);
         fs.closeSync(stderrFd);
     }
 };
 
-const setupManagedMcpRuntime = async ({ binaryPath } = {}) => {
+const setupManagedMcpRuntime = async (options = {}) => {
     if (!shouldAutoStartMcp()) {
         return { enabled: false, reason: 'disabled' };
     }
 
     await stopManagedMcpRuntime();
-    const started = await startManagedMcpRuntime({ binaryPath });
+    const started = await startManagedMcpRuntime(options);
     const endpoints = configuredEndpoints();
     try {
-        await waitForEndpoints(endpoints, readyTimeoutMs());
+        await waitForEndpoints(endpoints, readyTimeoutMs(), started);
     } catch (error) {
         await stopManagedMcpRuntime();
         throw error;
@@ -260,6 +376,8 @@ const setupManagedMcpRuntime = async ({ binaryPath } = {}) => {
         enabled: true,
         pid: started.pid,
         scriptPath: started.scriptPath,
+        stdoutPath: started.stdoutPath,
+        stderrPath: started.stderrPath,
         endpoints
     };
 };

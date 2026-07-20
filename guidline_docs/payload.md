@@ -1,16 +1,26 @@
-# How To Make Payload
-1. 페이로드의 기본 틀은 다음과 같음.
+# Payload Rules
+
+The MCP payload writer wraps the submitted body automatically:
+
 ```python
 from pwn import *
-p = process("./chall")
-e = ELF("./chall", checksec=false)
+import os
+p = remote(os.environ['PWN_AUTOMATOR_REMOTE_HOST'], int(os.environ['PWN_AUTOMATOR_REMOTE_PORT']))
+e = ELF('./<active binary>', checksec=False)
+libc = ELF('./libc.so.6', checksec=False) if os.path.exists('./libc.so.6') else e.libc
+
+<submitted payload body>
 
 p.interactive()
 ```
-위 기본 틀은 pwntools mcp에서 자동으로 wrapping하여 페이로드 파일을 생성하므로 위 페이로드 생성 시 위 4줄의 코드는 적을 필요 없음.
 
-2. 다음 규칙을 따를 것.
-    - 코드는 최대한 간결하고 최소화시켜서 작성해야 함.
-    - 페이로드는 Python의 pwntools를 사용하여 작성
-    - `ELF()`를 통해 chall 바이너리를 가져오거나 libc 파일을 가져와야 한다면 p = process("./chall") 바로 밑에 작성. 그리고 인자값 checksec은 false로 세팅
-    - p.interactive() 가 존재하므로 쉘 획득에 있어 굳이 코드로 작성하여 쉘 획득 여부까지 작성할 필요 없음
+Submit only the exploit body.
+
+- Use the existing `p` tube, `e` ELF object, and `libc` ELF object.
+- The existing `p` tube is already connected to the published Docker challenge service.
+- Do not add `remote(...)`, `process(...)`, `p.interactive()`, local respawn loops, or `p.close()`.
+- Do not hardcode `/workspace/...` or host absolute binary paths.
+- If you define `exploit(p)` or another entry function, call it once at top level.
+- Keep payloads concise and evidence-driven.
+
+Use pwno dynamic-analysis tools for debugger evidence. Payload bodies should stay minimal and should not add pause-based debugger attach scaffolding unless explicitly requested.

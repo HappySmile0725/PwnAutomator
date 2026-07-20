@@ -31,6 +31,7 @@ DEFAULT_PWN_HOST = "127.0.0.1"
 DEFAULT_PWN_PORT = 19191
 DEFAULT_PWN_TIMEOUT = 10.0
 TRACE_SCHEMA = "pwnautomator.raw_trace.v1"
+DEFAULT_TRACE_TEXT_LIMIT = 4096
 
 
 def _tool(
@@ -347,6 +348,77 @@ def _normalize_tool_args(arguments: Any) -> Dict[str, Any]:
     return {}
 
 
+def _trace_text_limit() -> int:
+    raw = str(os.environ.get("PWN_AUTOMATOR_TRACE_TEXT_LIMIT", DEFAULT_TRACE_TEXT_LIMIT)).strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return DEFAULT_TRACE_TEXT_LIMIT
+
+
+def _truncate_trace_text(value: Any, limit: int | None = None) -> str:
+    text = str(value or "")
+    size = limit or _trace_text_limit()
+    if len(text) <= size:
+        return text
+    return text[:size] + "\n...[truncated %d chars]" % (len(text) - size)
+
+
+def _summarize_trace_value(value: Any, depth: int = 0) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return _truncate_trace_text(value)
+    if isinstance(value, (int, float, bool)):
+        return value
+    if depth >= 3:
+        return "[truncated-depth]"
+    if isinstance(value, list):
+        limit = 12 if depth == 0 else 8
+        items = [_summarize_trace_value(item, depth + 1) for item in value[:limit]]
+        if len(value) > limit:
+            items.append("[truncated %d items]" % (len(value) - limit))
+        return items
+    if isinstance(value, dict):
+        return {key: _summarize_trace_value(item, depth + 1) for key, item in value.items()}
+    return _truncate_trace_text(repr(value))
+
+
+def _trace_phase_fields() -> Dict[str, Any]:
+    attempt_text = str(os.environ.get("PWN_AUTOMATOR_PHASE_ATTEMPT", "")).strip()
+    attempt = int(attempt_text) if attempt_text.isdigit() else None
+    return {
+        "phase": os.environ.get("PWN_AUTOMATOR_PHASE", "").strip() or None,
+        "phaseAttempt": attempt,
+        "phaseGoal": os.environ.get("PWN_AUTOMATOR_PHASE_GOAL", "").strip() or None,
+        "phaseObjective": os.environ.get("PWN_AUTOMATOR_PHASE_OBJECTIVE", "").strip() or None,
+    }
+
+
+def _summarize_tool_result_for_trace(result: Any) -> Any:
+    if not isinstance(result, dict):
+        return _summarize_trace_value(result)
+    payload: Dict[str, Any] = {
+        "isError": bool(result.get("isError")),
+        "structuredContent": _summarize_trace_value(result.get("structuredContent")),
+    }
+    content = result.get("content")
+    if isinstance(content, list):
+        payload["content"] = []
+        for item in content[:2]:
+            if isinstance(item, dict):
+                payload["content"].append({
+                    "type": item.get("type"),
+                    "text": _truncate_trace_text(item.get("text", ""))
+                })
+            else:
+                payload["content"].append(_summarize_trace_value(item))
+        if len(content) > 2:
+            payload["content"].append("[truncated %d items]" % (len(content) - 2))
+    else:
+        payload["content"] = _summarize_trace_value(content)
+    return payload
+
+
 def _trace_enabled() -> bool:
     value = os.environ.get("PWN_AUTOMATOR_TRACE_ENABLED", "true").strip().lower()
     return value not in ("0", "false", "no", "off")
@@ -369,7 +441,9 @@ def _trace_event(event: Dict[str, Any]) -> None:
             "monotonic_ns": time.monotonic_ns(),
             "pid": os.getpid(),
             "runId": os.environ.get("PWN_AUTOMATOR_TRACE_RUN_ID", ""),
+            "executionId": os.environ.get("PWN_AUTOMATOR_TRACE_EXECUTION_ID", "") or None,
             "source": "mcp_wrapper",
+            **_trace_phase_fields(),
             **event,
         }
         with open(trace_file, "a", encoding="utf-8") as fp:
@@ -546,7 +620,7 @@ class MCPServer:
                 _trace_event({
                     "type": "mcp_tools_list",
                     "requestId": req_id,
-                    "data": {"toolCount": len(TOOLS)},
+                    "data": {"toolCount": len(TOOLS), "tools": TOOLS},
                 })
                 if req_id is not None:
                     self._send_result(req_id, {"tools": TOOLS})
@@ -576,7 +650,7 @@ class MCPServer:
                     "type": "mcp_tool_call",
                     "requestId": req_id,
                     "tool": name,
-                    "arguments": args,
+                    "arguments": _summarize_trace_value(args),
                 })
                 result = self._call_tool(name, args)
                 _trace_event({
@@ -585,7 +659,7 @@ class MCPServer:
                     "tool": name,
                     "durationMs": round((time.monotonic_ns() - started_ns) / 1_000_000, 3),
                     "isError": bool(result.get("isError")),
-                    "response": result,
+                    "response": _summarize_tool_result_for_trace(result),
                 })
                 if req_id is not None:
                     self._send_result(req_id, result)

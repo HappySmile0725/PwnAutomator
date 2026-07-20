@@ -1,10 +1,15 @@
 /pwnable-dashboard/node_modules/*
 /pwnable-dashboard/.env
 /pwnable-dashboard/data/*
+/datasets/raw/*
+/datasets/packages/*
+/scratch/
 /mcps/ghidra_12.0.2_PUBLIC
+/mcps/C*Users*/
 /mcps/challenge/*
 /mcps/challenges/*
 /mcps/test/*
+/pwnable-dashboard/peda-session-*.txt
 __pycache__/
 *.py[cod]
 *.class

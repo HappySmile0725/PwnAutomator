@@ -22,11 +22,48 @@ const sanitizeRunId = (value) => String(value || 'manual')
     .replace(/[^a-z0-9_.-]/g, '-')
     .replace(/^-+|-+$/g, '') || 'manual';
 
-const tracePathsForRun = (runId) => {
-    const safeRunId = sanitizeRunId(runId);
+const displayPath = (filePath) => {
+    if (!filePath) {
+        return '';
+    }
+    try {
+        const relative = path.relative(paths.repoRoot, filePath);
+        if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+            return relative.replace(/\\/g, '/');
+        }
+    } catch (_) {
+        // Fall through to basename.
+    }
+    return path.basename(filePath);
+};
+
+const sanitizeTraceMetadata = (value, key = '') => {
+    if (value === null || value === undefined) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        if (/path$/i.test(key) || /file$/i.test(key)) {
+            return displayPath(value);
+        }
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value.map((item) => sanitizeTraceMetadata(item, key));
+    }
+    if (typeof value === 'object') {
+        return Object.entries(value).reduce((result, [entryKey, entryValue]) => {
+            result[entryKey] = sanitizeTraceMetadata(entryValue, entryKey);
+            return result;
+        }, {});
+    }
+    return value;
+};
+
+const tracePathsForRun = (runId, executionId) => {
+    const safeTraceId = sanitizeRunId(executionId || runId);
     return {
         currentTracePath: path.join(paths.traceDir, 'codex_raw_trace.jsonl'),
-        rawDatasetPath: path.join(paths.rootRawDatasetDir, `${safeRunId}.jsonl`)
+        rawDatasetPath: path.join(paths.rootRawDatasetDir, `${safeTraceId}.jsonl`)
     };
 };
 
@@ -50,8 +87,8 @@ const appendTraceEventSync = (filePath, event) => {
     }
 };
 
-const resetTrace = async ({ runId, metadata }) => {
-    const tracePaths = tracePathsForRun(runId);
+const resetTrace = async ({ runId, executionId, metadata }) => {
+    const tracePaths = tracePathsForRun(runId, executionId);
     if (!isTraceEnabled()) {
         return { enabled: false, ...tracePaths };
     }
@@ -61,14 +98,16 @@ const resetTrace = async ({ runId, metadata }) => {
     const meta = {
         schema: TRACE_SCHEMA,
         runId,
+        executionId: executionId || null,
         createdAt: new Date().toISOString(),
-        currentTracePath: tracePaths.currentTracePath,
-        rawDatasetPath: tracePaths.rawDatasetPath,
+        currentTracePath: displayPath(tracePaths.currentTracePath),
+        rawDatasetPath: displayPath(tracePaths.rawDatasetPath),
         note: 'Raw trace contains Codex-visible output and MCP calls/responses. Hidden model reasoning is not available unless Codex emits it.',
-        ...metadata
+        ...sanitizeTraceMetadata(metadata || {})
     };
     appendTraceEventSync(tracePaths.currentTracePath, {
         runId,
+        executionId: executionId || null,
         source: 'dashboard',
         type: 'trace_start',
         data: meta
@@ -88,8 +127,8 @@ const countLines = async (filePath) => {
     }
 };
 
-const publishRawTrace = async ({ runId, status, extra } = {}) => {
-    const tracePaths = tracePathsForRun(runId);
+const publishRawTrace = async ({ runId, executionId, status, extra } = {}) => {
+    const tracePaths = tracePathsForRun(runId, executionId);
     if (!isTraceEnabled()) {
         return { enabled: false, ...tracePaths };
     }
@@ -102,6 +141,7 @@ const publishRawTrace = async ({ runId, status, extra } = {}) => {
             enabled: true,
             schema: TRACE_SCHEMA,
             runId,
+            executionId: executionId || null,
             status: status || 'published',
             publishedAt: new Date().toISOString(),
             eventCount,

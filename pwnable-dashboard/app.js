@@ -1,5 +1,4 @@
-const dotenv = require('dotenv');
-dotenv.config();
+require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
@@ -11,6 +10,7 @@ const indexRouter = require('./routers/index.router');
 const dashboardRouter = require('./routers/dashboard/dashboard.router');
 const authRouter = require('./routers/auth/auth.router');
 const checkLogin = require('./middlewares/checkLogin.middleware');
+const { stopManagedMcpRuntime } = require('./services/dashboard/pipeline/mcpRuntime.service');
 
 const app = express();
 const HOST = process.env.HOST || '0.0.0.0';
@@ -46,6 +46,31 @@ app.use(indexRouter);
 app.use(authRouter);
 app.use(dashboardRouter);
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`Server is running on http://${HOST}:${PORT}`);
 });
+
+server.on('error', (error) => {
+  if (error?.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use on ${HOST}.`);
+    process.exit(1);
+  }
+  throw error;
+});
+
+let shuttingDown = false;
+const shutdown = async (signal) => {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`Received ${signal}; stopping dashboard and MCP runtime.`);
+  await new Promise((resolve) => server.close(resolve));
+  await stopManagedMcpRuntime().catch((error) => {
+    console.error(`Failed to stop MCP runtime: ${error.message}`);
+  });
+  process.exit(0);
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

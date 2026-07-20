@@ -8,7 +8,7 @@ CHALLENGE_DIR="${PWN_AUTOMATOR_CHALLENGE_DIR:-${SCRIPT_DIR}/test}"
 IMAGE_TAG="${CODEX_PWNO_MCP_DOCKER_IMAGE:-pwno-mcp-local:latest}"
 CONTAINER_NAME="${PWNO_MCP_CONTAINER_NAME:-pwnautomator-pwno-mcp}"
 HOST_BIND="${PWNO_MCP_BIND_HOST:-127.0.0.1}"
-PORT="${PWNO_MCP_PORT:-5500}"
+PORT="${PWNO_MCP_PORT:-5601}"
 MODE="${1:-http}"
 BUILD_PLATFORM="${PWNO_MCP_BUILD_PLATFORM:-${TARGETPLATFORM:-linux/amd64}}"
 FORCE_BUILD="${PWNO_MCP_FORCE_BUILD:-false}"
@@ -63,6 +63,13 @@ if [[ "$FORCE_BUILD" == "true" || "$FORCE_BUILD" == "1" ]] || ! docker image ins
     "$PWNO_REPO_DIR" >&2
 fi
 
+PWNO_ENV_ARGS=(
+  -e "PWN_AUTOMATOR_CHALLENGE_DIR=/workspace"
+  -e "PWN_AUTOMATOR_BINARY_PATH=/workspace/$(basename "${PWN_AUTOMATOR_BINARY_PATH:-chall}")"
+  -e "PWN_AUTOMATOR_REMOTE_HOST=${PWN_AUTOMATOR_REMOTE_HOST:-}"
+  -e "PWN_AUTOMATOR_REMOTE_PORT=${PWN_AUTOMATOR_REMOTE_PORT:-}"
+)
+
 if [[ "$MODE" == "stdio" ]]; then
   exec docker run --rm -i \
     --cap-add=SYS_PTRACE \
@@ -70,6 +77,7 @@ if [[ "$MODE" == "stdio" ]]; then
     --security-opt seccomp=unconfined \
     --security-opt apparmor=unconfined \
     -v "${CHALLENGE_DIR}:/workspace" \
+    "${PWNO_ENV_ARGS[@]}" \
     "$IMAGE_TAG" --stdio
 fi
 
@@ -90,4 +98,5 @@ exec docker run --rm \
   --security-opt apparmor=unconfined \
   -p "${HOST_BIND}:${PORT}:5500" \
   -v "${CHALLENGE_DIR}:/workspace" \
+  "${PWNO_ENV_ARGS[@]}" \
   "$IMAGE_TAG"

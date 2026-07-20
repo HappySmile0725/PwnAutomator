@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const Docker = require('dockerode');
 
 const dockerClient = new Docker();
@@ -9,6 +10,11 @@ const CHALLENGE_ROLE = 'challenge';
 const ignoredDirs = new Set(['.git', '__MACOSX', 'node_modules', '.pwnautomator', 'solution']);
 const ignoredFiles = new Set(['hack.py']);
 const ignoredBinaryNames = new Set(['Dockerfile', 'flag', ...ignoredFiles]);
+const ignoredBinaryNamePatterns = [
+    /^libc(?:-[\d.]+)?\.so(?:\.\d+)*$/i,
+    /^ld(?:-[\d.]+)?\.so(?:\.\d+)*$/i,
+    /^ld-linux.*\.so(?:\.\d+)*$/i
+];
 const ignoredBinaryExtensions = new Set([
     '.json',
     '.md',
@@ -275,6 +281,22 @@ const startContainer = async ({ imageTag, containerName, runId }) => {
     return container;
 };
 
+const copyFirstExistingFromContainer = async (containerIdOrName, containerPaths, hostPath) => {
+    if (!containerIdOrName || !hostPath) {
+        return null;
+    }
+    fs.mkdirSync(path.dirname(hostPath), { recursive: true });
+    for (const containerPath of containerPaths.filter(Boolean)) {
+        const result = spawnSync('docker', ['cp', '-L', `${containerIdOrName}:${containerPath}`, hostPath], {
+            encoding: 'utf8'
+        });
+        if (result.status === 0) {
+            return { containerPath, hostPath };
+        }
+    }
+    return null;
+};
+
 const inspectContainer = async (containerIdOrName) => {
     const container = dockerClient.getContainer(containerIdOrName);
     return container.inspect();
@@ -287,22 +309,64 @@ const isContainerRunning = async (containerIdOrName) => {
     try {
         const info = await inspectContainer(containerIdOrName);
         return Boolean(info?.State?.Running);
-    } catch (error) {
+    } catch (_) {
         return false;
     }
 };
 
 const tokenizeDockerInstruction = (line) => line.match(/"[^"]+"|'[^']+'|\S+/g) || [];
 
+const stripDockerQuotes = (value) => String(value || '').replace(/^["']|["']$/g, '');
+
 const normalizeDockerSource = (value) => String(value || '')
     .replace(/^["']|["']$/g, '')
     .replace(/\\/g, '/');
+
+const isIgnoredBinaryName = (name) => {
+    const base = String(name || '');
+    return ignoredBinaryNames.has(base) || ignoredBinaryNamePatterns.some((pattern) => pattern.test(base));
+};
+
+const isIgnoredBinaryPath = (filePath) => isIgnoredBinaryName(path.basename(filePath));
+
+const expandDockerVariables = (value, variables) => String(value || '').replace(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g, (match, braced, plain) => {
+    const key = braced || plain;
+    return Object.prototype.hasOwnProperty.call(variables, key) ? variables[key] : match;
+});
+
+const collectDockerVariables = (line, variables) => {
+    const match = line.match(/^(env|arg)\s+(.+)$/i);
+    if (!match) {
+        return;
+    }
+    const tokens = tokenizeDockerInstruction(match[2]).map(stripDockerQuotes);
+    if (tokens.length === 0) {
+        return;
+    }
+    if (tokens[0].includes('=')) {
+        for (const token of tokens) {
+            const index = token.indexOf('=');
+            if (index > 0) {
+                variables[token.slice(0, index)] = expandDockerVariables(token.slice(index + 1), variables);
+            }
+        }
+        return;
+    }
+    if (match[1].toLowerCase() === 'env' && tokens.length >= 2) {
+        variables[tokens[0]] = expandDockerVariables(tokens.slice(1).join(' '), variables);
+        return;
+    }
+    const index = tokens[0].indexOf('=');
+    if (match[1].toLowerCase() === 'arg' && index > 0) {
+        variables[tokens[0].slice(0, index)] = expandDockerVariables(tokens[0].slice(index + 1), variables);
+    }
+};
 
 const parseJsonDockerArgs = (rawArgs) => {
     try {
         const parsed = JSON.parse(rawArgs);
         return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
+    } catch (_) {
         return [];
     }
 };
@@ -314,6 +378,7 @@ const parseDockerfileSources = (dockerfilePath) => {
 
     const content = fs.readFileSync(dockerfilePath, 'utf8');
     const sources = [];
+    const variables = {};
 
     for (const rawLine of content.split(/\r?\n/)) {
         const line = rawLine.trim();
@@ -321,15 +386,18 @@ const parseDockerfileSources = (dockerfilePath) => {
             continue;
         }
 
+        collectDockerVariables(line, variables);
+
         const match = line.match(/^(copy|add)\s+(.+)$/i);
         if (!match) {
             continue;
         }
 
         const rawArgs = match[2].trim();
+        const argsWithoutFlags = rawArgs.replace(/^(--\S+\s+)*/, '').trim();
         let args;
-        if (rawArgs.startsWith('[')) {
-            args = parseJsonDockerArgs(rawArgs);
+        if (argsWithoutFlags.startsWith('[')) {
+            args = parseJsonDockerArgs(argsWithoutFlags);
         } else {
             args = tokenizeDockerInstruction(rawArgs).filter((token) => !token.startsWith('--'));
         }
@@ -339,7 +407,7 @@ const parseDockerfileSources = (dockerfilePath) => {
         }
 
         for (const source of args.slice(0, -1)) {
-            const normalized = normalizeDockerSource(source);
+            const normalized = normalizeDockerSource(expandDockerVariables(source, variables));
             if (!normalized || normalized === '.' || normalized === './' || normalized.includes('*')) {
                 continue;
             }
@@ -367,7 +435,7 @@ const findLargestLikelyBinary = (baseDir) => {
                 }
                 continue;
             }
-            if (!entry.isFile() || ignoredBinaryNames.has(entry.name)) {
+            if (!entry.isFile() || isIgnoredBinaryName(entry.name)) {
                 continue;
             }
 
@@ -392,7 +460,7 @@ const resolveTrackingFiles = (dockerfilePath, contextDir) => {
     const resolved = sources
         .map((source) => path.resolve(contextDir, source))
         .filter((sourcePath) => fs.existsSync(sourcePath) && fs.statSync(sourcePath).isFile())
-        .filter((sourcePath) => path.basename(sourcePath).toLowerCase() !== 'flag')
+        .filter((sourcePath) => !isIgnoredBinaryPath(sourcePath))
         .map((sourcePath) => path.relative(contextDir, sourcePath).replace(/\\/g, '/'));
 
     if (resolved.length > 0) {
@@ -405,6 +473,7 @@ const resolveTrackingFiles = (dockerfilePath, contextDir) => {
 
 module.exports = {
     buildDockerImage,
+    copyFirstExistingFromContainer,
     findRunningChallengeContainer,
     findDockerContext,
     inspectContainer,

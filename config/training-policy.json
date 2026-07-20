@@ -1,0 +1,189 @@
+{
+  "version": 4,
+  "targetModel": {
+    "family": "Qwen3-Coder-Next",
+    "checkpoint": "Qwen/Qwen3-Coder-Next",
+    "contextLength": 262144,
+    "nativeToolCalls": true,
+    "thinkingMode": false,
+    "chatTemplateSource": "tokenizer"
+  },
+  "phaseBuckets": ["analysis_static", "analysis_dynamic", "analysis_dynamic_poc", "exploit", "repair"],
+  "headRouting": {
+    "analysis_static": {
+      "headType": "analysis.static",
+      "adapter": "qwen3-coder-next-analysis-static-lora",
+      "trainingFile": "train/qwen3_coder_next_static_analysis_sft.jsonl"
+    },
+    "analysis_dynamic": {
+      "headType": "analysis.dynamic",
+      "adapter": "qwen3-coder-next-analysis-dynamic-lora",
+      "trainingFile": "train/qwen3_coder_next_dynamic_analysis_sft.jsonl",
+      "optionalForFastPath": false
+    },
+    "analysis_dynamic_poc": {
+      "headType": "analysis.dynamic_poc",
+      "deployable": false,
+      "distillsTo": "analysis_dynamic",
+      "optionalForFastPath": true,
+      "triggeredBy": "exploit_or_repair_attempt_window_budget_exhausted_with_reference_poc_available"
+    },
+    "exploit": {
+      "headType": "exploit.coder",
+      "adapter": "qwen3-coder-next-exploit-coder-lora",
+      "trainingFile": "train/qwen3_coder_next_exploit_sft.jsonl"
+    },
+    "repair": {
+      "headType": "exploit.repair",
+      "adapter": "qwen3-coder-next-exploit-repair-lora",
+      "trainingFile": "train/qwen3_coder_next_repair_sft.jsonl"
+    }
+  },
+  "solveStrategy": {
+    "mode": "fast_first",
+    "dynamicMode": "always",
+    "dynamicRequiredKeywords": ["libc", "heap", "race", "format string", "runtime leak", "stack address", "one_gadget"],
+    "skipDynamicPackageBlocker": true
+  },
+  "contracts": {
+    "analysisStatic": {
+      "agentHead": "analysis.static",
+      "artifactSchema": "pwnautomator.analysis.static.v1",
+      "role": "Static Vulnerability Analyst",
+      "supervisionTarget": "Identify concrete input-to-bug paths, mitigations, and the exact runtime facts still needed to prove leak and exploitability.",
+      "allowedTools": ["ghidra_call", "help", "meta", "func_list", "func_by_name", "func_by_addr", "mem_hex", "mem_dec", "mem_str", "mem_asm", "disassemble_function", "decompile_by_name", "decompile_by_addr", "search_func", "search_str", "search_bytes", "search_xrefs_to", "search_xrefs_from"],
+      "allowedGhidraCommands": ["help", "meta", "func.list", "func.name", "func.addr", "mem.hex", "mem.dec", "mem.str", "mem.asm", "decompile.name", "decompile.addr", "search.func", "search.str", "search.bytes", "search.xrefs_to", "search.xrefs_from"],
+      "forbiddenTools": ["pwncli", "run_command", "pwn_payload_write", "pwn_payload_execute", "pwn_session_send", "pwn_session_poll", "attach", "create_debug_session", "execute", "/proc/<pid>/maps", "/proc/<pid>/mem"],
+      "toolBudget": {},
+      "requiredEvidence": ["binary protections", "resolved input entry point and input-to-code path", "single strongest input-connected target", "specific vulnerable operation or missing bound", "candidate leak or no-leak-needed hypothesis", "PIE/libc base leak requirement only when addresses from that region are used", "heap allocator/libc version constraints when heap primitives are involved", "candidate control-flow or direct flag-read route", "preferred route order: system('/bin/sh'), one_gadget, then ORW/direct flag read", "minimal dynamic proof requirements"],
+      "outputContract": "Return exactly one raw pwnautomator.analysis.static.v1 JSON object with protections, targets, and exploit_requirements. exploit_requirements must name the leak/base facts only when the exploit uses addresses from that region, explicitly mark PIE/libc as not needed when applicable, include heap allocator/libc version constraints when relevant, and include control-flow/direct-read facts that dynamic analysis must prove. Do not include markdown or code fences.",
+      "successCriteria": ["valid JSON", "one strongest target", "target names an input-to-bug reason", "exploit requirements include leak/control proof requirements", "no runtime execution"],
+      "failurePolicy": "When evidence is insufficient, record uncertainty in the target reason; do not invent dynamic facts.",
+      "artifactPolicy": "No runtime execution, payload code, or host file writes."
+    },
+    "analysisDynamic": {
+      "agentHead": "analysis.dynamic",
+      "artifactSchema": "pwnautomator.analysis.dynamic.v1",
+      "role": "Dynamic Exploitability Analyst",
+      "supervisionTarget": "Prove the selected static target has a usable leak/base route and a control-flow or direct flag-read route before exploit code is written.",
+      "allowedTools": ["create_debug_session", "set_file", "get_session_info", "run", "set_breakpoint", "get_context", "get_memory", "execute"],
+      "forbiddenTools": ["pwncli", "run_command", "pwn_payload_write", "pwn_payload_execute", "pwn_session_send", "pwn_session_poll", "decompile_by_name", "decompile_by_addr", "get_decompiled_code", "breakpoint spraying", "external command/input files", "GDB python open(...)", "source <file>", "run < file", "shell redirection", "/tmp command files", "/proc/<pid>/maps", "/proc/<pid>/mem"],
+      "toolBudget": {},
+      "requiredEvidence": ["selected target reference", "confirmed leak/base source only when needed or explicit no-leak-needed proof", "leak parsing method and offset/base calculation when a leak is needed", "confirmed PIE base leak only when PIE addresses are used", "confirmed libc base leak only when libc addresses are used", "confirmed heap allocator/libc version constraints when heap primitives are used", "confirmed control-flow/direct flag-read path", "runner-compatible launch assumptions", "final route chosen in priority order: system('/bin/sh'), one_gadget, then ORW/direct flag read", "only facts needed to write or repair the exploit", "explicit blocker only when no route can be proven"],
+      "outputContract": "Return exactly one raw pwnautomator.analysis.dynamic.v1 JSON object with runtime_facts. runtime_facts must include observations, primitives, blockers, and exploitability: {status, leak:{status,method,evidence}, control:{status,method,evidence}, exploit_plan:[...]}. Each observation kind must be one of: control, leak, offset, crash, blocker. Use only targeted debugger checks; do not spray breakpoints or use external file-backed GDB command/input workflows. Do not confirm routes that require debugger-only disabled ASLR, fixed PIE bases, custom argv padding, altered environment variables, or launch arguments unavailable to pwn_payload_execute. Do not include exploit code, markdown, or code fences.",
+      "successCriteria": ["valid JSON", "runtime_facts.observations is non-empty", "every observation is tied to a selected static target", "leak is confirmed or proven unnecessary", "control-flow/direct flag-read path is confirmed", "route is reproducible by pwn_payload_execute runner assumptions", "no payload write or execution"],
+      "failurePolicy": "If a candidate cannot be exercised, keep analysis focused on proving an alternative leak/control route. Only report a blocker when no exploit route can be proven from the selected target.",
+      "artifactPolicy": "No exploit payload writes, session commands, or host file writes."
+    },
+    "analysisDynamicPoc": {
+      "agentHead": "analysis.dynamic_poc",
+      "artifactSchema": "pwnautomator.analysis.dynamic.v1",
+      "role": "PoC-Grounded Dynamic Exploitability Analyst",
+      "supervisionTarget": "Confirm, purely through debugger observation, why a provided reference exploit succeeds against this binary -- never by copying or paraphrasing the reference. Used only as a fallback after an unguided exploit/repair attempt window exhausts its turn budget.",
+      "allowedTools": ["create_debug_session", "set_file", "get_session_info", "run", "set_breakpoint", "get_context", "get_memory", "execute"],
+      "forbiddenTools": ["pwncli", "run_command", "pwn_payload_write", "pwn_payload_execute", "pwn_session_send", "pwn_session_poll", "decompile_by_name", "decompile_by_addr", "get_decompiled_code", "breakpoint spraying", "external command/input files", "GDB python open(...)", "source <file>", "run < file", "shell redirection", "/tmp command files", "/proc/<pid>/maps", "/proc/<pid>/mem"],
+      "toolBudget": { "maxCalls": 20 },
+      "requiredEvidence": ["selected target reference", "debugger-confirmed leak/base source or explicit no-leak-needed proof", "debugger-confirmed control-flow or direct flag-read path", "every fact traced to a live debugger observation, never to the reference exploit's own comments"],
+      "outputContract": "Return exactly one raw pwnautomator.analysis.dynamic.v1 JSON object with runtime_facts. Each observation kind must be one of: control, leak, offset, crash, blocker. Every observation must cite a debugger-confirmed fact. Never copy code, offsets, or comments directly from the reference exploit without independently confirming them via the debugger. Do not include exploit code, markdown, or code fences.",
+      "successCriteria": ["valid JSON", "runtime_facts.observations is non-empty", "every observation is tied to a selected static target", "leak is confirmed or proven unnecessary", "control-flow/direct flag-read path is confirmed", "no payload write or execution"],
+      "failurePolicy": "If the reference route cannot be confirmed via the debugger, report the blocker instead of asserting the reference's claims unverified.",
+      "artifactPolicy": "No exploit payload writes, session commands, or host file writes. Verification only; the reference exploit is never copied into any output."
+    },
+    "exploit": {
+      "agentHead": "exploit.coder",
+      "artifactSchema": "pwnautomator.exploit.v1",
+      "role": "Exploit Coder Agent",
+      "supervisionTarget": "Use the validated leak/base and control-route proof from static and dynamic artifacts to write the exploit, then iterate until shell or flag access is verified.",
+      "allowedTools": ["pwn_payload_write", "pwn_payload_execute", "pwn_session_send", "pwn_session_poll", "pwn_session_stop"],
+      "forbiddenTools": ["pwncli", "run_command", "create_debug_session", "set_file", "attach", "get_context", "get_memory", "execute", "decompile_by_name", "decompile_by_addr", "get_decompiled_code", "remote(...) boilerplate", "process(...) boilerplate", "p.interactive()", "/proc/<pid>/maps", "/proc/<pid>/mem"],
+      "toolBudget": { "maxCalls": 40 },
+      "requiredEvidence": ["validated input entry point and vulnerability mechanism", "confirmed leak/no-leak-needed proof", "confirmed PIE base leak only when PIE addresses are used", "confirmed libc base leak only when libc addresses are used", "version-compatible heap strategy when heap primitives are used", "confirmed control-flow/direct flag-read route", "route chosen in priority order: system('/bin/sh'), one_gadget, then ORW/direct flag read", "offset/leak/base derivation when needed", "payload write and execution evidence", "post-exploit command or flag verification"],
+      "outputContract": "Use concise reasoning and MCP calls. Iterate with focused pwn_payload_write and execution attempts until command or flag verification succeeds, or an external blocker stops the turn.",
+      "successCriteria": ["payload exists", "payload policy passes", "uid/gid command output or direct flag evidence"],
+      "failurePolicy": "Do not repeat unchanged payloads. Use each observed failure to make the next focused correction.",
+      "artifactPolicy": "Write active challenge hack.py via pwn_payload_write only; dashboard mirrors it to exploit.py."
+    },
+    "repair": {
+      "agentHead": "exploit.repair",
+      "artifactSchema": "pwnautomator.repair.v1",
+      "role": "Exploit Repair Agent",
+      "supervisionTarget": "After exploit failure, prove the concrete failure cause with focused output/static/dynamic evidence, then make the smallest payload repair and verify shell or flag access.",
+      "allowedTools": ["ghidra_call", "help", "meta", "func_list", "func_by_name", "func_by_addr", "mem_hex", "mem_dec", "mem_str", "mem_asm", "disassemble_function", "decompile_by_name", "decompile_by_addr", "search_func", "search_str", "search_bytes", "search_xrefs_to", "search_xrefs_from", "pwn_payload_write", "pwn_payload_execute", "pwn_session_send", "pwn_session_poll", "pwn_session_continue", "pwn_session_stop", "create_debug_session", "set_file", "attach", "gdb_poll", "gdb_interrupt", "close_debug_session", "get_session_info", "set_breakpoint", "get_context", "get_memory", "execute"],
+      "allowedGhidraCommands": ["help", "meta", "func.list", "func.name", "func.addr", "mem.hex", "mem.dec", "mem.str", "mem.asm", "decompile.name", "decompile.addr", "search.func", "search.str", "search.bytes", "search.xrefs_to", "search.xrefs_from"],
+      "forbiddenTools": ["pwncli", "run_command", "run", "get_decompiled_code", "remote(...) boilerplate", "process(...) boilerplate", "p.interactive()", "breakpoint spraying", "external command/input files", "GDB python open(...)", "source <file>", "run < file", "shell redirection", "/tmp command files", "/proc/<pid>/maps", "/proc/<pid>/mem"],
+      "toolBudget": { "maxCalls": 80 },
+      "requiredEvidence": ["previous failure", "root-cause evidence from execution output, focused static recheck, or focused dynamic debugging", "identified failure point: leak parsing, base calculation, offset, alignment, gadget constraint, I/O synchronization, heap state, syscall arguments, or control-flow assumption", "changed payload", "payload write and execution evidence", "post-repair command or flag verification"],
+      "outputContract": "State the current failure hypothesis briefly, then prove or disprove it with the smallest necessary analysis path: execution output, focused Ghidra static recheck, focused debugger attach, or an optional diagnostic payload that prints [MCP][PID] with p.pid and pauses. Do not modify the payload until the failure cause is identified. After root cause proof, make focused pwn_payload_write repairs and verify command or flag success.",
+      "successCriteria": ["previous failure is addressed", "before and after payloads differ", "uid/gid command output or direct flag evidence"],
+      "failurePolicy": "Do not repeat unchanged payloads. Each further failure must produce a new correction based on fresh evidence.",
+      "artifactPolicy": "Write active challenge hack.py via pwn_payload_write only; dashboard mirrors it to exploit.py."
+    }
+  },
+  "promptConstraints": [
+    "Think, reason, and respond in English only. Do not write Korean or mixed-language explanations.",
+    "Use only dashboard-provided MCP tools. Do not use shell commands, local CLI tools, host file writes, external command/input files, or unmanaged process execution.",
+    "Do not read /proc/<pid>/maps, /proc/<pid>/mem, or similar procfs process memory paths. Do not use p.libs() or pwntools mapping helpers for base addresses.",
+    "Treat each phase contract, tool allowlist, and payload safety rule as mandatory. The dashboard ends a turn that violates them.",
+    "Never invent an offset, leak, base, or success result. Report an MCP blocker or an explicit uncertainty instead.",
+    "Exploit code must start only after analysis decides the exploit direction: input entry point, vulnerability primitive, leak/no-leak-needed proof, required offsets/bases, and control-flow or direct flag-read route.",
+    "Prefer exploit routes in this order when evidence supports them: system('/bin/sh'), one_gadget, then ORW/direct flag read.",
+    "Treat ASLR as always enabled. Leak PIE or libc base only when the exploit uses addresses from that region; otherwise explicitly use a no-leak-needed path.",
+    "Do not confirm exploit routes that depend on debugger-only disabled ASLR, fixed PIE bases, custom argv padding, altered environment variables, or launch arguments unavailable to pwn_payload_execute.",
+    "For heap exploits, choose a strategy compatible with the observed libc/glibc allocator version and hardening, including tcache, safe-linking, hook availability, bin checks, and removed legacy primitives.",
+    "Do not declare exploit success from a marker alone. Verify uid/gid command output through pwn_session_send plus pwn_session_poll, or verify direct flag output.",
+    "MCP servers are started by the dashboard runtime; do not start or restart them from this task."
+  ],
+  "compactPromptConstraints": [
+    "Think, reason, and respond in English only.",
+    "Use only the current phase's dashboard MCP tools and respect payload safety rules.",
+    "Do not use shell commands, pwncli, /proc/<pid>/maps, /proc/<pid>/mem, p.libs(), external command/input files, GDB file redirection, or unmanaged process wrappers.",
+    "ASLR is always on; PIE/libc base leaks are required only when using addresses from that region. Routes must match pwn_payload_execute launch assumptions. Heap strategies must match the observed libc/glibc allocator version and hardening.",
+    "Use observed evidence only. Report blockers instead of inventing facts.",
+    "Write payload code only after the exploit route, required bases, offsets, and control/direct-read path are decided.",
+    "For exploit success, verify a live command or direct flag output; weak markers are not success."
+  ],
+  "runtimeValidation": {
+    "flagRegex": "\\b[A-Za-z0-9_]{2,16}\\{[^}\\r\\n]{4,}\\}",
+    "commandIdentityRegex": "\\b(?:uid|gid)=\\d+(?:\\([^)]+\\))?",
+    "strongSuccessRegex": ["\\buid=\\d+(?:\\([^)]+\\))?", "\\bgid=\\d+(?:\\([^)]+\\))?", "\\b[A-Za-z0-9_]{2,16}\\{[^}\\r\\n]{4,}\\}"],
+    "weakSuccessRegex": ["\\b(?:pwned|still_alive|final_check)\\b"],
+    "unstableRegex": ["got eof", "broken pipe", "session closed", "connection closed", "connection reset", "traceback"],
+    "acceptedEvidenceGrades": ["flag", "command"]
+  },
+  "staticValidation": {
+    "maxTargets": 1,
+    "minReasonChars": 24
+  },
+  "dynamicValidation": {
+    "maxObservations": 4,
+    "minEvidenceChars": 20,
+    "requireExploitabilityProof": true
+  },
+  "payloadValidation": {
+    "disallowedPatterns": ["/proc/", "/workspace/", "[stack]", "proc.pid", ".libs(", ".elf_mapping(", ".libc_mapping("],
+    "disallowedRegex": ["/proc\\b", "/workspace/", "\\[stack\\]", "proc\\.pid", "\\.libs\\s*\\(", "\\.elf_mapping\\s*\\(", "\\.libc_mapping\\s*\\("],
+    "wrapperBoilerplatePatterns": ["remote(", "process(", ".interactive(", ".close("],
+    "wrapperBoilerplateRegex": ["\\bremote\\s*\\(", "\\bprocess\\s*\\(", "\\.interactive\\s*\\(", "\\.close\\s*\\("],
+    "maxTimeSleepCalls": 1
+  },
+  "datasetCuration": {
+    "qualityProfile": "specialist_adapters",
+    "packageRequiresGold": true,
+    "goldRequiresExploitCode": true,
+    "primaryRequiresSuccessfulExecution": true,
+    "weakMarkersAreNotSuccess": true,
+    "packageRequiresQwenNative": true,
+    "packageRequiresDynamicAnalysis": true,
+    "qwenMinToolCalls": 1,
+    "qwenMaxToolResultChars": 5000,
+    "qwenMaxEpisodeChars": 100000000,
+    "qwenMinFinalAssistantChars": 80,
+    "qwenMaxFailedToolCalls": 2,
+    "requireEnglishAssistant": true,
+    "requireAgentHead": true,
+    "requireHeadType": true,
+    "requireStructuredArtifacts": true,
+    "rejectVerifierOnlyExploitSummary": false,
+    "phaseExportOrder": ["analysis_static", "analysis_dynamic", "exploit", "repair"]
+  }
+}
